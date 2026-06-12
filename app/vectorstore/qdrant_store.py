@@ -83,13 +83,6 @@ def get_embedding_model() -> TextEmbedding:
 def create_collection(collection_name: str = "deeptrace_research") -> None:
     """
     Creates a new collection in Qdrant if it does not already exist.
-    
-    A "collection" in Qdrant is equivalent to a "table" in a relational database.
-    We must define the size of the vectors (384 for our chosen model) and the 
-    distance metric used to compare them (Cosine similarity is standard for text).
-    
-    Args:
-        collection_name (str): The name of the collection to create.
     """
     try:
         client = get_qdrant_client()
@@ -107,18 +100,26 @@ def create_collection(collection_name: str = "deeptrace_research") -> None:
             print(f"Collection '{collection_name}' already exists. Skipping creation.")
     except Exception as e:
         print(f"Error creating collection '{collection_name}': {e}")
-        # In a robust production app, we would raise this or log to a telemetry service
         raise
+
+def reset_collection(collection_name: str = "deeptrace_research") -> None:
+    """
+    Deletes and recreates the collection to ensure a clean state for a new run,
+    preventing cross-run contamination while allowing retries to accumulate data safely.
+    """
+    try:
+        client = get_qdrant_client()
+        if client.collection_exists(collection_name):
+            print(f"Deleting existing Qdrant collection: '{collection_name}' to prevent cross-run contamination...")
+            client.delete_collection(collection_name)
+        create_collection(collection_name)
+    except Exception as e:
+        print(f"Error resetting collection: {e}")
 
 
 def store_documents(documents: List[Dict[str, Any]], collection_name: str = "deeptrace_research") -> None:
     """
     Converts text documents into embeddings and stores them in Qdrant.
-    
-    Args:
-        documents: A list of dictionaries representing the search results. 
-                   Expected format: {"snippet": "...", "title": "...", "source": "...", "question": "..."}
-        collection_name: The Qdrant collection to store the data in.
     """
     if not documents:
         print("No documents provided to store.")
@@ -164,17 +165,9 @@ def store_documents(documents: List[Dict[str, Any]], collection_name: str = "dee
         raise
 
 
-def search_similar(query: str, collection_name: str = "deeptrace_research", limit: int = 3) -> List[Dict[str, Any]]:
+def search_similar(query: str, collection_name: str = "deeptrace_research", limit: int = 15) -> List[Dict[str, Any]]:
     """
     Searches the vector database for documents most similar to the provided query.
-    
-    Args:
-        query (str): The user's search string (e.g., a specific sub-question).
-        collection_name (str): The collection to search within.
-        limit (int): How many top results to return.
-        
-    Returns:
-        A list of dictionaries containing the metadata (payload) of the closest matches.
     """
     try:
         client = get_qdrant_client()
@@ -187,14 +180,17 @@ def search_similar(query: str, collection_name: str = "deeptrace_research", limi
         search_result = client.query_points(
             collection_name=collection_name,
             query=query_vector.tolist(),
-            limit=limit
+            limit=limit,
+            with_payload=True
         )
         
         # 3. Extract and return just the original payload (text and metadata)
         retrieved_docs = []
         for hit in search_result.points:
             if hit.payload:
-                retrieved_docs.append(hit.payload)
+                payload_copy = hit.payload.copy()
+                payload_copy["_qdrant_score"] = hit.score
+                retrieved_docs.append(payload_copy)
             
         return retrieved_docs
         

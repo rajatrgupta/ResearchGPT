@@ -12,6 +12,7 @@ from app.agents.planner import planner_node
 from app.agents.search import search_node
 from app.agents.retriever import retriever_node
 from app.agents.critic import critic_node
+from app.agents.query_optimizer import query_optimizer_node
 from app.agents.writer import writer_node
 
 # ==========================================
@@ -54,22 +55,23 @@ MAX_ITERATIONS = 3
 #          ├─ [is_valid == True] ───┐
 #          |                        |
 #          └─ [iterations >= MAX] ──┤
-#                                   v
-#                              +---------+
-#                              | Writer  |
-#                              +---------+
 #                                   |
+#                                   | [REJECTED and < MAX]
 #                                   v
-#                                 [END]
+#                           +-----------------+
+#                           | QueryOptimizer  |
+#                           +-----------------+
+#                                   |
+#                                   v (Back to Search)
 
-def route_after_critic(state: ResearchState) -> Literal["search", "writer"]:
+def route_after_critic(state: ResearchState) -> Literal["query_optimizer", "writer"]:
     """
     Conditional routing function that decides the next step in the graph.
     
     Logic:
     - If Critic approved (is_valid == True): Proceed to Writer.
     - If Max Iterations reached: Force proceed to Writer (Graceful Degradation).
-    - Otherwise: Route back to Search for more data.
+    - Otherwise: Route to Query Optimizer to craft new search paths.
     """
     
     is_valid = state.get("is_valid", False)
@@ -84,8 +86,8 @@ def route_after_critic(state: ResearchState) -> Literal["search", "writer"]:
         return "writer"
         
     print(f"\n[Workflow] Critic rejected (Score: {state.get('quality_score')}). Feedback: {state.get('critic_feedback')}")
-    print(f"[Workflow] Retry loop {iteration_count}/{MAX_ITERATIONS} triggered. Routing back to Search Agent.")
-    return "search"
+    print(f"[Workflow] Retry loop {iteration_count}/{MAX_ITERATIONS} triggered. Routing to Query Optimizer.")
+    return "query_optimizer"
 
 
 def build_graph():
@@ -104,6 +106,7 @@ def build_graph():
     workflow.add_node("search", search_node)
     workflow.add_node("retriever", retriever_node)
     workflow.add_node("critic", critic_node)
+    workflow.add_node("query_optimizer", query_optimizer_node)
     workflow.add_node("writer", writer_node)
     
     # 3. Define the Flow (Edges)
@@ -121,10 +124,11 @@ def build_graph():
         "critic",
         route_after_critic,
         {
-            "search": "search",
+            "query_optimizer": "query_optimizer",
             "writer": "writer"
         }
     )
+    workflow.add_edge("query_optimizer", "search")
     
     # Standard exit path
     workflow.add_edge("writer", END)

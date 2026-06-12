@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from app.graph.workflow import build_graph, MAX_ITERATIONS
+from app.vectorstore.qdrant_store import reset_collection
 
 # ==========================================
 # EXPLANATION OF INTERNAL NODE OPERATIONS
@@ -18,7 +19,8 @@ from app.graph.workflow import build_graph, MAX_ITERATIONS
 # 3. RETRIEVER: Indexes and pulls Top-K relevant facts.
 # 4. CRITIC: Scores the research (0.0-1.0).
 # 5. ROUTER: Determines if we should RETRY search or move to WRITER.
-# 6. WRITER: Synthesizes final markdown report.
+# 6. OPTIMIZER: (Only on Retry) Generates 3 highly targeted search strings.
+# 7. WRITER: Synthesizes final markdown report.
 
 def merge_state(current: dict, update: dict) -> dict:
     """
@@ -37,6 +39,9 @@ def merge_state(current: dict, update: dict) -> dict:
     return new_state
 
 def main():
+    print("Resetting Qdrant collection for a fresh run...")
+    reset_collection("deeptrace_research")
+    
     print("Building DeepTrace Graph...")
     graph = build_graph()
     
@@ -45,6 +50,7 @@ def main():
         "query": "Future of Artificial Intelligence",
         "sub_questions": [],
         "search_results": [],
+        "retry_queries": [],
         "retrieved_documents": [],
         "sources": [],
         "report": "",
@@ -80,7 +86,20 @@ def main():
                 current_state = merge_state(current_state, state_update)
                 
                 # Logic for Critic/Router Visibility
-                if node_name == "critic":
+                if node_name == "retriever":
+                    docs = state_update.get("retrieved_documents", [])
+                    print(f"[Retriever] Curated Top {len(docs)} documents after Trust-Tier Reranking:")
+                    for idx, doc in enumerate(docs, 1):
+                        url = doc.get("source") or doc.get("link") or "unknown"
+                        domain = urllib.parse.urlparse(url).netloc if url != "unknown" else "unknown"
+                        if domain.startswith("www."):
+                            domain = domain[4:]
+                        tier = doc.get("trust_tier", "DEFAULT_TRUST")
+                        o_score = doc.get("original_score", 0.0)
+                        r_score = doc.get("reranked_score", 0.0)
+                        print(f"  {idx}. [{tier}] {domain} (Original: {o_score:.4f} -> Reranked: {r_score:.4f})")
+                        
+                elif node_name == "critic":
                     score = state_update.get("quality_score", 0.0)
                     feedback = state_update.get("critic_feedback", "N/A")
                     is_valid = state_update.get("is_valid", False)
@@ -92,7 +111,11 @@ def main():
                     elif current_state["iteration_count"] >= MAX_ITERATIONS:
                         print(f"[Router] Decision: REJECTED | MAX_ITERATIONS ({MAX_ITERATIONS}) reached. Forcing Synthesis.")
                     else:
-                        print(f"[Router] Decision: RETRY -> Routing back to Search Agent.")
+                        print(f"[Router] Decision: RETRY -> Routing to Query Optimizer.")
+                        
+                elif node_name == "query_optimizer":
+                    optimized_queries = state_update.get("retry_queries", [])
+                    print(f"[QueryOptimizer] Generated {len(optimized_queries)} targeted queries.")
                 
                 print(f"[{node_name.capitalize()}] Node Complete.")
 

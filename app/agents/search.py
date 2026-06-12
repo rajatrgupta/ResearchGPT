@@ -19,54 +19,7 @@ from app.graph.state import ResearchState
 # PHASE 3 UPGRADE: Feedback-Aware Retries
 # In Phase 2, this agent was linear. In Phase 3, it is cyclic.
 # If the Critic node finds the research insufficient, it routes back here.
-# Instead of repeating the same searches, this agent now checks 'critic_feedback'
-# and generates new, targeted search queries using deterministic Python logic.
-
-def generate_retry_queries(original_query: str, feedback: str) -> List[str]:
-    """
-    Deterministic keyword extraction from Critic feedback. 
-    Strips editorial filler and constructs natural search queries.
-    """
-    # 1. Strip common 'Editorial Filler' phrases often used by the Critic LLM
-    editor_filler = [
-        "coverage is missing", "research lacks", "missing", 
-        "need more data on", "provide more on", "information about",
-        "please include", "the documents are", "low score because"
-    ]
-    
-    cleaned_feedback = feedback.lower()
-    for phrase in editor_filler:
-        cleaned_feedback = cleaned_feedback.replace(phrase, "")
-
-    # 2. Extract alphanumeric words and filter out common stop words
-    # This leaves only the 'Signal' keywords (nouns/topics)
-    words = re.findall(r'\w+', cleaned_feedback)
-    
-    stop_words = {
-        "is", "are", "the", "a", "an", "and", "on", "about", 
-        "for", "with", "of", "in", "to", "it", "was", "were"
-    }
-    
-    # Filter keywords: must not be a stop word and length > 2
-    keywords = [w for w in words if w not in stop_words and len(w) > 2]
-    
-    # Deduplicate while preserving order
-    unique_keywords = []
-    for k in keywords:
-        if k not in unique_keywords:
-            unique_keywords.append(k)
-
-    # 3. Construct Queries: Use the Top 3 extracted keywords
-    # Format: [Original Query] [Keyword]
-    retry_queries = []
-    for kw in unique_keywords[:3]:
-        retry_queries.append(f"{original_query} {kw}")
-
-    # 4. Safety Fallback: If feedback was too short or non-extractable
-    if not retry_queries:
-        retry_queries.append(f"{original_query} detailed analysis")
-
-    return retry_queries
+# In Phase 3B, it reads 'retry_queries' populated by the Query Optimizer.
 
 def search_node(state: ResearchState) -> Dict[str, Any]:
     """
@@ -84,13 +37,13 @@ def search_node(state: ResearchState) -> Dict[str, Any]:
     query = state.get("query", "")
     sub_questions = state.get("sub_questions", [])
     current_iteration = state.get("iteration_count", 0)
-    feedback = state.get("critic_feedback", "")
+    retry_queries = state.get("retry_queries", [])
     
     # PHASE 3 LOGIC: Determine which queries to run
-    # If this is a retry (iteration > 0), we use the feedback to pivot.
-    if current_iteration > 0 and feedback:
-        print(f"[Search] Retry cycle {current_iteration}. Refining search based on Critic feedback...")
-        queries_to_run = generate_retry_queries(query, feedback)
+    # If this is a retry (iteration > 0) and we have optimized queries, use them.
+    if current_iteration > 0 and retry_queries:
+        print(f"[Search] Retry cycle {current_iteration}. Refining search based on Query Optimizer...")
+        queries_to_run = retry_queries
     else:
         # Initial run: Use the planner's sub-questions
         queries_to_run = sub_questions
