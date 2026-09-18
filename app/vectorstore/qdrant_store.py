@@ -9,26 +9,26 @@ CORE CONCEPTS & EXPLANATIONS
    Instead of guessing, the LLM reads external search results and synthesizes them.
 
 2. Why do LLMs hallucinate?
-   LLMs are probabilistic (guessing the next word). Without a real-time factual 
-   reference, they will confidently generate statistically probable, but factually 
+   LLMs are probabilistic (guessing the next word). Without a real-time factual
+   reference, they will confidently generate statistically probable, but factually
    incorrect, information.
 
 3. What is a Vector Database?
-   A database optimized to store, index, and query high-dimensional arrays (vectors) 
+   A database optimized to store, index, and query high-dimensional arrays (vectors)
    based on their semantic similarity rather than exact keyword matches.
 
 4. Why Qdrant instead of PostgreSQL?
-   Qdrant is natively built in Rust for highly concurrent vector search workloads. 
-   It utilizes HNSW graphs out-of-the-box, offering vastly superior speed and scaling 
+   Qdrant is natively built in Rust for highly concurrent vector search workloads.
+   It utilizes HNSW graphs out-of-the-box, offering vastly superior speed and scaling
    for pure vector similarity search compared to a bolted-on PostgreSQL extension.
 
 5. What are embeddings?
-   Numerical representations of text. An embedding model translates sentences into 
+   Numerical representations of text. An embedding model translates sentences into
    coordinates in a high-dimensional space where similar concepts are grouped together.
 
 6. How retrieval works internally?
    - Query text -> converted to an embedding vector.
-   - Database calculates mathematical distance (e.g., Cosine Similarity) between the 
+   - Database calculates mathematical distance (e.g., Cosine Similarity) between the
      query vector and stored document vectors.
    - Database returns the top-K vectors with the shortest distance.
 
@@ -36,20 +36,33 @@ CORE CONCEPTS & EXPLANATIONS
 PRODUCTION PATTERNS
 =========================================
 Why Lazy Loading is Better Than Global Initialization:
-If we initialize `QdrantClient` and `TextEmbedding` at the module level (globally), 
-they execute the moment this file is imported. This can cause the app to crash at startup 
-if the Qdrant server isn't ready or env vars aren't loaded yet. It also consumes memory 
-for the ML models immediately. Lazy loading (using getter functions) defers instantiation 
-until the exact moment the tool is called, making the system resilient, memory-efficient, 
+If we initialize `QdrantClient` and `TextEmbedding` at the module level (globally),
+they execute the moment this file is imported. This can cause the app to crash at startup
+if the Qdrant server isn't ready or env vars aren't loaded yet. It also consumes memory
+for the ML models immediately. Lazy loading (using getter functions) defers instantiation
+until the exact moment the tool is called, making the system resilient, memory-efficient,
 and easier to test/mock.
+
+Phase 4B: Run-Level Isolation
+store_documents() now stamps run_id and cycle onto every payload. search_similar()
+accepts an optional run_id and applies a Qdrant payload filter so each run only
+retrieves its own documents. This eliminates cross-run contamination without
+removing the reset_collection() local-development safeguard.
 """
 
 import os
 import uuid
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
+from qdrant_client.models import (
+    Distance,
+    VectorParams,
+    PointStruct,
+    Filter,
+    FieldCondition,
+    MatchValue,
+)
 from fastembed import TextEmbedding
 
 # ==========================================
@@ -60,6 +73,7 @@ VECTOR_SIZE = 384
 
 
 _client = None
+_embedding_model = None
 
 def get_qdrant_client() -> QdrantClient:
     """
@@ -74,10 +88,15 @@ def get_qdrant_client() -> QdrantClient:
 
 def get_embedding_model() -> TextEmbedding:
     """
-    Lazy loads the TextEmbedding model. 
-    This prevents the heavy model from loading into memory upon module import.
+    Lazy loads the TextEmbedding model using a Singleton pattern.
+    The FastEmbed model (~380MB) is only loaded from disk once per process.
+    Calling this function multiple times within the same run returns the
+    already-loaded instance, preventing redundant memory allocation and I/O.
     """
-    return TextEmbedding(model_name=EMBEDDING_MODEL_NAME)
+    global _embedding_model
+    if _embedding_model is None:
+        _embedding_model = TextEmbedding(model_name=EMBEDDING_MODEL_NAME)
+    return _embedding_model
 
 
 def create_collection(collection_name: str = "deeptrace_research") -> None:
@@ -91,7 +110,7 @@ def create_collection(collection_name: str = "deeptrace_research") -> None:
             client.create_collection(
                 collection_name=collection_name,
                 vectors_config=VectorParams(
-                    size=VECTOR_SIZE, 
+                    size=VECTOR_SIZE,
                     distance=Distance.COSINE
                 ),
             )
@@ -117,9 +136,27 @@ def reset_collection(collection_name: str = "deeptrace_research") -> None:
         print(f"Error resetting collection: {e}")
 
 
-def store_documents(documents: List[Dict[str, Any]], collection_name: str = "deeptrace_research") -> None:
+def store_documents(
+    documents: List[Dict[str, Any]],
+    collection_name: str = "deeptrace_research",
+    run_id: str = "",
+    cycle_number: int = 0,
+) -> None:
     """
     Converts text documents into embeddings and stores them in Qdrant.
+
+    Phase 4B: Each stored point's payload is stamped with:
+      - run_id:  The UUID4 of the current main() execution. Used by search_similar()
+                 to filter retrieval to only this run's documents, preventing stale
+                 documents from previous runs competing in the similarity search.
+      - cycle:   The iteration_count at the time of storage. Informational metadata
+                 for future freshness scoring or debugging. NOT used for filtering.
+
+    Args:
+        documents:        List of normalized search result dicts to store.
+        collection_name:  Target Qdrant collection.
+        run_id:           Active run's UUID4. Empty string if called outside pipeline.
+        cycle_number:     Active iteration_count from ResearchState.
     """
     if not documents:
         print("No documents provided to store.")
@@ -127,73 +164,115 @@ def store_documents(documents: List[Dict[str, Any]], collection_name: str = "dee
 
     try:
         client = get_qdrant_client()
-        
+
         # Ensure collection exists before attempting to store vectors
         if not client.collection_exists(collection_name):
             print(f"Collection '{collection_name}' does not exist. Creating it now before storing...")
             create_collection(collection_name)
 
         embedding_model = get_embedding_model()
-        
+
         # Extract the raw text (snippets) that we want to embed for semantic search
         texts = [doc.get("snippet", "") for doc in documents]
-        
+
         # Generate embeddings locally using fastembed.
         embeddings_generator = embedding_model.embed(texts)
-        
+
         points = []
         # Loop over our documents and their corresponding newly-generated vectors
         for doc, vector in zip(documents, embeddings_generator):
             point_id = str(uuid.uuid4())
-            
+
+            # Phase 4B: Stamp run_id and cycle onto the payload without mutating
+            # the original document dict (which is shared with ResearchState).
+            payload = {
+                **doc,
+                "run_id": run_id,
+                "cycle": cycle_number,
+            }
+
             point = PointStruct(
                 id=point_id,
-                vector=vector.tolist(), # Convert numpy array to standard Python list
-                payload=doc             # Store all metadata (title, snippet, link)
+                vector=vector.tolist(),  # Convert numpy array to standard Python list
+                payload=payload          # Store all metadata including run/cycle tags
             )
             points.append(point)
-            
+
         # Upsert securely writes our points to the database.
         client.upsert(
             collection_name=collection_name,
             points=points
         )
-        print(f"Successfully stored {len(points)} documents in Qdrant.")
-        
+        print(f"Successfully stored {len(points)} documents in Qdrant "
+              f"(run={run_id[:8]}..., cycle={cycle_number}).")
+
     except Exception as e:
         print(f"Error storing documents in Qdrant collection '{collection_name}': {e}")
         raise
 
 
-def search_similar(query: str, collection_name: str = "deeptrace_research", limit: int = 15) -> List[Dict[str, Any]]:
+def search_similar(
+    query: str,
+    collection_name: str = "deeptrace_research",
+    limit: int = 15,
+    run_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     """
     Searches the vector database for documents most similar to the provided query.
+
+    Phase 4B: When run_id is provided, applies a Qdrant payload filter that restricts
+    results to only documents that were stored in the current run. This prevents
+    documents from previous application runs from polluting the retrieval results.
+
+    Within a single run, all cycles' documents remain eligible (isolation is at the
+    run boundary, not the cycle boundary). This preserves cumulative research behavior
+    while eliminating cross-run contamination.
+
+    Args:
+        query:            The search string to find similar documents for.
+        collection_name:  Target Qdrant collection.
+        limit:            Maximum number of similar documents to return.
+        run_id:           If provided, restricts results to documents from this run only.
+                          None = no filter (backward compatible, for testing only).
     """
     try:
         client = get_qdrant_client()
         embedding_model = get_embedding_model()
-        
+
         # 1. Convert the query text into its vector representation
         query_vector = list(embedding_model.embed([query]))[0]
-        
-        # 2. Perform the semantic similarity search in Qdrant
+
+        # 2. Build the optional run-level payload filter
+        query_filter = None
+        if run_id:
+            query_filter = Filter(
+                must=[
+                    FieldCondition(
+                        key="run_id",
+                        match=MatchValue(value=run_id)
+                    )
+                ]
+            )
+
+        # 3. Perform the semantic similarity search in Qdrant
         search_result = client.query_points(
             collection_name=collection_name,
             query=query_vector.tolist(),
+            query_filter=query_filter,
             limit=limit,
             with_payload=True
         )
-        
-        # 3. Extract and return just the original payload (text and metadata)
+
+        # 4. Extract and return just the original payload (text and metadata)
         retrieved_docs = []
         for hit in search_result.points:
             if hit.payload:
                 payload_copy = hit.payload.copy()
                 payload_copy["_qdrant_score"] = hit.score
                 retrieved_docs.append(payload_copy)
-            
+
         return retrieved_docs
-        
+
     except Exception as e:
         print(f"Error searching similar documents in Qdrant: {e}")
         # Return an empty list so upstream nodes don't crash, allowing graceful degradation

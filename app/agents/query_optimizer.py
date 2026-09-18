@@ -6,6 +6,7 @@ the retrieved documents. It analyzes the original query, the Critic's feedback,
 and the previously retrieved documents to formulate highly targeted search queries.
 """
 
+import time
 from typing import Dict, Any, List
 from langchain_core.prompts import PromptTemplate
 from pydantic import BaseModel, Field
@@ -62,7 +63,7 @@ def query_optimizer_node(state: ResearchState) -> Dict[str, Any]:
     prompt = PromptTemplate(
         template="""You are an expert Search Query Optimizer.
 The system attempted to research a topic but the QA Critic rejected the findings.
-Your job is to generate EXACTLY 3 highly optimized DuckDuckGo search queries to find the missing information.
+Your job is to generate EXACTLY 3 highly optimized web search queries to find the missing information.
 
 Original User Query: {query}
 
@@ -90,11 +91,17 @@ Rules for new queries:
     chain = prompt | structured_llm
     
     try:
+        start_time = time.time()
+        print("[QueryOptimizer] START LLM generation...")
+        
         result: QueryOptimizationResult = chain.invoke({
             "query": query,
             "critic_feedback": critic_feedback,
             "context": context_str
         })
+        
+        elapsed = time.time() - start_time
+        print(f"[QueryOptimizer] COMPLETE LLM generation in {elapsed:.2f}s")
         
         return {
             "retry_queries": result.retry_queries,
@@ -102,8 +109,9 @@ Rules for new queries:
         }
         
     except Exception as e:
-        error_msg = f"Query Optimizer failed during execution: {str(e)}"
-        print(f"Warning: {error_msg}")
+        elapsed = time.time() - start_time if 'start_time' in locals() else 0.0
+        error_msg = f"Query Optimizer failed during execution in {elapsed:.2f}s: {str(e)}"
+        print(f"[QueryOptimizer] FAILED LLM generation: {error_msg}")
         # Deterministic fallback ensuring exactly 3 distinct search queries
         fallback_queries = [
             query,

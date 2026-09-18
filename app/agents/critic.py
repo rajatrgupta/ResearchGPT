@@ -1,47 +1,37 @@
 """
 Critic Agent for DeepTrace
-
-This module defines the Critic Node. Its responsibility is to act as a 
-Quality Assurance (QA) gatekeeper. It evaluates the semantically filtered 
-retrieved documents against the user's original query and outputs a score 
-and feedback.
 """
 
+import time
 from typing import Dict, Any
 from pydantic import BaseModel, Field
 from langchain_core.prompts import PromptTemplate
 from app.graph.state import ResearchState
 from app.core.llm import get_llm
 
-# ==========================================
-# CONFIGURATION CONSTANTS
-# ==========================================
-# Deterministic threshold for routing. 
-# By defining this in Python rather than prompt engineering the LLM to guess 
-# validity, we gain strict, observable control over the system's strictness.
 QUALITY_THRESHOLD = 0.70
 
-# ==========================================
-# PYDANTIC SCHEMA
-# ==========================================
-# We define a strict schema to force the LLM to return a predictable JSON object.
-# This prevents the LLM from outputting conversational filler and ensures our
-# Python code can reliably parse the 'quality_score' as a float.
 class CriticEvaluation(BaseModel):
+    faithfulness_score: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="A score between 0.0 and 1.0 indicating how grounded the information is in the retrieved context. Are there hallucinations?"
+    )
+    relevancy_score: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="A score between 0.0 and 1.0 indicating how well the retrieved context answers the original user query."
+    )
     quality_score: float = Field(
         ge=0.0,
         le=1.0,
-        description="A score between 0.0 and 1.0 indicating how well the retrieved context answers the user query. 1.0 is a perfect, comprehensive answer. 0.0 is completely irrelevant or missing data."
+        description="An overall combined score between 0.0 and 1.0. 1.0 is a perfect, comprehensive answer."
     )
     critic_feedback: str = Field(
-        description="A single, concise sentence explaining the score. If the score is low, state exactly what information is missing. Example: 'Missing specific statistics and recent dates.'"
+        description="A single, concise sentence explaining the score and what information is missing."
     )
 
 def format_retrieved_documents_for_eval(documents: list[Dict[str, Any]]) -> str:
-    """
-    Helper function to format documents for the Critic's prompt, 
-    including rich metadata for better evaluation.
-    """
     formatted_context = ""
     for i, doc in enumerate(documents):
         title = doc.get("title", "Untitled")
@@ -56,21 +46,9 @@ def format_retrieved_documents_for_eval(documents: list[Dict[str, Any]]) -> str:
     return formatted_context
 
 def critic_node(state: ResearchState) -> Dict[str, Any]:
-    """
-    Executes the evaluation phase of the research workflow.
-    
-    Args:
-        state: The current ResearchState containing 'query' and 'retrieved_documents'.
-        
-    Returns:
-        A dictionary containing 'quality_score', 'critic_feedback', 'is_valid',
-        and a 'status' indicator.
-    """
-    
     query = state.get("query", "")
     retrieved_documents = state.get("retrieved_documents", [])
     
-    # Defensive programming: If we have no documents, the score is automatically 0.
     if not retrieved_documents:
         return {
             "quality_score": 0.0,
@@ -79,51 +57,51 @@ def critic_node(state: ResearchState) -> Dict[str, Any]:
             "status": "validation_failed"
         }
 
-    # Format the rich context for the LLM
     context_str = format_retrieved_documents_for_eval(retrieved_documents)
 
-    # Prompt Engineering: We frame the LLM as a harsh grading system.
-    # We strictly enforce the 0.0 - 1.0 range in the prompt.
     prompt = PromptTemplate(
-        template="""You are an expert Research Editor. Your job is to evaluate if the provided retrieved documents contain enough factual information to write a comprehensive, high-quality report answering the user's query.
+        template="""You are an elite Research Evaluator reviewing raw context gathered by junior analysts.
+
+Your goal is to evaluate the context against the User Query and return specific metrics.
+
+DYNAMIC EVALUATION CRITERIA:
+- If the query is QUANTITATIVE (e.g., tech comparisons, financial analysis, market share): Demand hard data, specific metrics, entities, and recent dates.
+- If the query is QUALITATIVE/HISTORICAL (e.g., historical policies, philosophy, literature): Demand logical flow, thematic accuracy, qualitative reasoning, and appropriate historical context. Do not penalize qualitative topics for lacking hard numbers.
+
+EVALUATION METRICS (RAGAS-Style):
+1. Faithfulness: Is the information factual and free of obvious contradictions/hallucinations based strictly on the context?
+2. Relevancy: Does the provided context directly answer the User Query without drifting into tangential topics?
+3. Quality Score: An overall judgment based on Faithfulness and Relevancy.
+
+Output your response strictly in the required JSON format containing the scores and actionable feedback.
 
 User Query: {query}
 
 --- RETRIEVED DOCUMENTS ---
 {context}
 --- END DOCUMENTS ---
-
-Evaluate the coverage, relevance, and completeness of the documents against the query.
-Assign a score between 0.0 (useless) and 1.0 (perfect). 
-YOU MUST OUTPUT A SCORE BETWEEN 0.0 AND 1.0.
-
-Be harsh. If critical sub-topics are missing, lower the score.
 """,
         input_variables=["query", "context"]
     )
 
-    # Initialize the centralized LLM
     llm_config = get_llm()
     robust_llm = llm_config["llm"]
-
-    # RAG UPGRADE: We bind our Pydantic schema to the LLM. 
-    # This forces OpenRouter models to return structured JSON matching CriticEvaluation.
     structured_llm = robust_llm.with_structured_output(CriticEvaluation)
-    
     chain = prompt | structured_llm
 
     try:
-        # Execute the evaluation chain
+        start_time = time.time()
+        print("[Critic] START LLM evaluation with Ragas metrics...")
+        
         result: CriticEvaluation = chain.invoke({
             "query": query,
             "context": context_str
         })
         
-        # DETERMINISTIC DECISION LOGIC
-        # We decouple evaluation from routing. The LLM only evaluates (scores).
-        # The Python code makes the hard deterministic routing decision.
-        is_valid = result.quality_score >= QUALITY_THRESHOLD
+        elapsed = time.time() - start_time
+        print(f"[Critic] COMPLETE LLM evaluation in {elapsed:.2f}s (Score: {result.quality_score:.2f})")
         
+        is_valid = result.quality_score >= QUALITY_THRESHOLD
         status = "validation_passed" if is_valid else "validation_failed"
         
         return {
@@ -134,11 +112,9 @@ Be harsh. If critical sub-topics are missing, lower the score.
         }
         
     except Exception as e:
-        error_msg = f"Critic failed during evaluation: {str(e)}"
-        print(f"Warning: {error_msg}")
-        # FAIL-CLOSED LOGIC:
-        # If the LLM call fails (e.g., API outage), we do NOT approve the data.
-        # We fail closed, forcing a retry or a graceful exit if MAX_ITERATIONS is reached.
+        elapsed = time.time() - start_time if 'start_time' in locals() else 0.0
+        error_msg = f"Critic failed during evaluation in {elapsed:.2f}s: {str(e)}"
+        print(f"[Critic] FAILED LLM evaluation: {error_msg}")
         return {
             "errors": [error_msg],
             "quality_score": 0.0,

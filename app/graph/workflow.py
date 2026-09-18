@@ -64,13 +64,13 @@ MAX_ITERATIONS = 3
 #                                   |
 #                                   v (Back to Search)
 
-def route_after_critic(state: ResearchState) -> Literal["query_optimizer", "writer"]:
+def route_after_critic(state: ResearchState) -> Literal["query_optimizer", "writer", "force_degradation"]:
     """
     Conditional routing function that decides the next step in the graph.
     
     Logic:
     - If Critic approved (is_valid == True): Proceed to Writer.
-    - If Max Iterations reached: Force proceed to Writer (Graceful Degradation).
+    - If Max Iterations reached: Force proceed to Writer via degradation node.
     - Otherwise: Route to Query Optimizer to craft new search paths.
     """
     
@@ -83,12 +83,16 @@ def route_after_critic(state: ResearchState) -> Literal["query_optimizer", "writ
         
     if iteration_count >= MAX_ITERATIONS:
         print(f"\n[Workflow] Critic rejected but MAX_ITERATIONS ({MAX_ITERATIONS}) reached. Forcing synthesis.")
-        return "writer"
+        return "force_degradation"
         
     print(f"\n[Workflow] Critic rejected (Score: {state.get('quality_score')}). Feedback: {state.get('critic_feedback')}")
     print(f"[Workflow] Retry loop {iteration_count}/{MAX_ITERATIONS} triggered. Routing to Query Optimizer.")
     return "query_optimizer"
 
+
+def force_degradation_node(state: ResearchState) -> dict:
+    """Sets the degradation mode flag to true before routing to writer."""
+    return {"degradation_mode": True}
 
 def build_graph():
     """
@@ -107,6 +111,7 @@ def build_graph():
     workflow.add_node("retriever", retriever_node)
     workflow.add_node("critic", critic_node)
     workflow.add_node("query_optimizer", query_optimizer_node)
+    workflow.add_node("force_degradation", force_degradation_node)
     workflow.add_node("writer", writer_node)
     
     # 3. Define the Flow (Edges)
@@ -125,10 +130,12 @@ def build_graph():
         route_after_critic,
         {
             "query_optimizer": "query_optimizer",
-            "writer": "writer"
+            "writer": "writer",
+            "force_degradation": "force_degradation"
         }
     )
     workflow.add_edge("query_optimizer", "search")
+    workflow.add_edge("force_degradation", "writer")
     
     # Standard exit path
     workflow.add_edge("writer", END)

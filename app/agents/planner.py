@@ -5,6 +5,7 @@ This module defines the Planner Node. Its responsibility is to take a broad
 research query and break it down into exactly 5 focused, actionable sub-questions.
 """
 
+import time
 from typing import Dict, Any
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
@@ -87,7 +88,13 @@ Return ONLY the valid JSON object. Do not include any introductory or concluding
     try:
         # Execute the chain
         # The chain will: format prompt -> call LLM -> parse JSON output into Pydantic model
+        start_time = time.time()
+        print("[Planner] START LLM generation...")
+        
         result: SubQuestions = chain.invoke({"query": query})
+        
+        elapsed = time.time() - start_time
+        print(f"[Planner] COMPLETE LLM generation in {elapsed:.2f}s")
         
         # Validate EXACTLY 5 sub-questions.
         # We do NOT silently truncate. We raise a ValueError to trigger failure handling
@@ -103,7 +110,9 @@ Return ONLY the valid JSON object. Do not include any introductory or concluding
     except Exception as e:
         # Error handling: If parsing fails (e.g., LLM returned bad JSON), 
         # validation fails (wrong number of questions), or API fails (all fallbacks exhausted)
-        error_msg = f"Planner failed: {str(e)}"
+        elapsed = time.time() - start_time if 'start_time' in locals() else 0.0
+        error_msg = f"Planner failed in {elapsed:.2f}s: {str(e)}"
+        print(f"[Planner] FAILED LLM generation: {error_msg}")
         return {
             "errors": [error_msg],
             "status": "planning_failed",

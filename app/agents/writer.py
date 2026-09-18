@@ -1,38 +1,25 @@
 """
 Writer Agent for DeepTrace
-
-This module defines the Writer Node. Its responsibility is to take the semantically
-filtered retrieved documents and synthesize them into a cohesive, well-formatted 
-markdown report with citations.
 """
 
-from typing import Dict, Any
+import time
+from typing import Dict, Any, List
+from pydantic import BaseModel, Field
 from langchain_core.prompts import PromptTemplate
 from app.graph.state import ResearchState
 from app.core.llm import get_llm
 
-# ==========================================
-# RULE 1: WHAT IS THIS CONCEPT?
-# ==========================================
-# The Writer Agent executes the Generation phase of RAG (Retrieval-Augmented Generation).
-# 
-# Why context quality over quantity?
-# In Phase 1, we fed the LLM ALL raw search results. This risks confusing the LLM 
-# with noise, exceeding token limits, and triggering the "Lost in the Middle" problem 
-# where LLMs ignore data buried in large prompts.
-#
-# Now, we strictly use `retrieved_documents`. By feeding the LLM a much smaller, 
-# mathematically curated list of highly relevant facts, we drastically reduce 
-# hallucinations and ensure a grounded, accurate synthesis.
+class Citation(BaseModel):
+    claim: str = Field(description="The factual claim")
+    source_url: str = Field(description="URL of the retrieved document")
+
+class ReportOutput(BaseModel):
+    report_content: str = Field(description="The main markdown report. MUST embed inline citations strictly as [Source: URL]")
+    citations: List[Citation] = Field(description="List of all citations used")
 
 def format_retrieved_documents(documents: list[Dict[str, Any]]) -> str:
-    """
-    Helper function to convert the semantically filtered documents into a 
-    readable string for the LLM prompt context.
-    """
     formatted_context = ""
     for i, doc in enumerate(documents):
-        # We handle cases where the payload might be missing keys
         question = doc.get("question", "General Topic")
         title = doc.get("title", "Untitled")
         snippet = doc.get("snippet", "")
@@ -47,30 +34,24 @@ def format_retrieved_documents(documents: list[Dict[str, Any]]) -> str:
     return formatted_context
 
 def writer_node(state: ResearchState) -> Dict[str, Any]:
-    """
-    Executes the synthesis and reporting phase of the RAG workflow.
-    
-    Args:
-        state: The current ResearchState containing 'query' and 'retrieved_documents'.
-        
-    Returns:
-        A dictionary containing the final synthesized 'report', 'status', 
-        and optionally 'errors'.
-    """
-    
     query = state.get("query", "")
-    
-    # RAG UPGRADE: We explicitly stop using raw 'search_results'.
-    # We now pull strictly from the highly curated 'retrieved_documents'.
     retrieved_documents = state.get("retrieved_documents", [])
+    degradation_mode = state.get("degradation_mode", False)
     
-    # Defensive programming: Handle empty retrieval gracefully.
-    # If Qdrant failed or returned nothing, we cannot write a grounded report.
+    if degradation_mode:
+        fallback_report = f"# Research Report: {query}\n\n"
+        fallback_report += "## Insufficient Data / Exhausted Research Limits\n"
+        fallback_report += "The autonomous research system exhausted its maximum retry loops without finding enough high-quality context to meet the minimum verification threshold. The generated report has been aborted to prevent hallucinations."
+        
+        return {
+            "report": fallback_report,
+            "status": "writing_degraded"
+        }
+
     if not retrieved_documents:
         fallback_report = f"# Research Report: {query}\n\n"
         fallback_report += "## Error\n"
-        fallback_report += "Unfortunately, the retrieval system was unable to find "
-        fallback_report += "highly relevant documents for this query. The report generation was aborted to prevent hallucination."
+        fallback_report += "Unfortunately, the retrieval system was unable to find highly relevant documents for this query. The report generation was aborted to prevent hallucination."
         
         return {
             "report": fallback_report,
@@ -78,27 +59,23 @@ def writer_node(state: ResearchState) -> Dict[str, Any]:
             "errors": ["Writer received empty retrieved_documents list."]
         }
 
-    # Format the high-quality context for the LLM
     context_str = format_retrieved_documents(retrieved_documents)
 
-    # Prompt Engineering: Force specific markdown sections and inline citations.
-    # We heavily instruct the LLM to rely ONLY on the provided context.
     prompt = PromptTemplate(
-        template="""You are an expert research analyst and technical writer.
-Your task is to synthesize the provided research findings into a highly cohesive, professional markdown report answering the user's original query.
+        template="""You are a Tier-1 Strategy Consultant and AI Researcher (like McKinsey or BCG). Your task is to synthesize the retrieved documents into a highly dense, analytical, and professional Markdown report.
+
+STRICT RULES - READ CAREFULLY:
+1. NO FLUFF or FILLER: Never use generic introductory/concluding sentences. Start directly with high-impact insights.
+2. NO REPETITION & STRICT THEMATIC ISOLATION: Never repeat the same concept, theme, or insight across different sections. If you explain a core dynamic (like "centralization") in one section, do NOT repeat it in another. Group related points so each section provides strictly net-new historical depth.
+3. DEEP GRANULARITY: Do not stay at the surface level. Extract and synthesize the deepest possible details from the context (e.g., specific monopolies, named institutions, exact tax policies, or distinct regional dynamics). Contrast these granular details directly.
+4. ADAPT TO MISSING DATA: If you lack sufficient data for a specific topic, DO NOT output a disclaimer like "Insufficient data available." Instead, intelligently synthesize whatever related context you do have, merge the section into a broader heading, or omit the heading entirely so the report flows flawlessly.
+5. CLEAN CITATIONS: You must cite every fact inline using strict Markdown hyperlink formatting. It must look like this: `[Publisher/Site Name](https://...)`. Never dump raw URLs directly into the text.
+6. PROFESSIONAL FORMATTING: Use H2/H3 headers, bullet points for metrics, and bold text for key insights.
+7. EXECUTIVE SYNTHESIS: You must ALWAYS conclude the report with a final section titled "## Executive Synthesis". This must be a brief 2-3 sentence paragraph at the very bottom answering the "So what?" of the research and drawing a final strategic conclusion.
+
+Output the final Markdown report directly. Do NOT wrap it in JSON.
 
 User Query: {query}
-
-You MUST structure your report EXACTLY with the following markdown headers:
-# Introduction
-# Key Findings
-# Analysis
-# Conclusion
-
-Rules:
-1. Synthesize the information based ONLY on the provided RESEARCH FINDINGS. Do not invent or hallucinate facts.
-2. Include inline citations where possible using the exact format: [Source: https://...] based on the provided Links.
-3. Ensure smooth transitions between sections.
 
 --- RESEARCH FINDINGS ---
 {context}
@@ -109,65 +86,55 @@ Write the report now:
         input_variables=["query", "context"]
     )
 
-    # Initialize the centralized, fault-tolerant LLM
     llm_config = get_llm()
-    robust_llm = llm_config["llm"]
+    writer_llm = llm_config["llm"]
+    
+    chain = prompt | writer_llm
 
-    # Create the execution chain
-    chain = prompt | robust_llm
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
+        try:
+            start_time = time.time()
+            if attempt == 1:
+                print("[Writer] START LLM report synthesis...")
+            else:
+                print(f"[Writer] RETRY {attempt}/{max_retries} LLM report synthesis...")
+            
+            result = chain.invoke({
+                "query": query,
+                "context": context_str
+            })
+            
+            raw_content = result.content
+            if isinstance(raw_content, list):
+                final_content = "\n".join([chunk.get("text", "") if isinstance(chunk, dict) else str(chunk) for chunk in raw_content])
+            elif not isinstance(raw_content, str):
+                final_content = str(raw_content)
+            else:
+                final_content = raw_content
 
-    try:
-        # Execute the chain
-        result = chain.invoke({
-            "query": query,
-            "context": context_str
-        })
-        
-        # Extract string content from the AIMessage
-        report_content = result.content
-        
-        return {
-            "report": report_content,
-            "status": "writing_complete"
-        }
-        
-    except Exception as e:
-        error_msg = f"Writer failed to generate report: {str(e)}"
-        return {
-            "errors": [error_msg],
-            "status": "writing_failed",
-            "report": "An error occurred during report generation."
-        }
-
-# ==========================================
-# CONNECTING THE DOTS
-# ==========================================
-# How this writer connects to the ecosystem:
-# 
-# - Retriever Agent: The Retriever used Qdrant to filter out the noise from the raw search. 
-#   The Writer relies entirely on the 'snippet' and 'source' fields provided by the 
-#   Retriever in `retrieved_documents`.
-# 
-# - Future Critic Agent: The Critic will review THIS generated report against the original 
-#   query and the `retrieved_documents` to ensure the Writer didn't hallucinate facts 
-#   outside of the provided context.
-# 
-# - Future PostgreSQL storage: The output of this agent (`report`) is the final 
-#   artifact that will be served to the Streamlit UI and stored long-term.
-
-# ==========================================
-# EXAMPLE INPUT / OUTPUT
-# ==========================================
-# Input State:
-# {
-#     "query": "Quantum Computing Timelines",
-#     "retrieved_documents": [
-#         {"question": "Hardware?", "title": "IBM News", "snippet": "IBM says 2029...", "source": "https://ibm.com"}
-#     ]
-# }
-#
-# Expected Return Dictionary:
-# {
-#     "report": "# Introduction\nQuantum computing... \n\n# Key Findings\nIBM targets 2029 [Source: https://ibm.com]... \n\n# Analysis\n... \n\n# Conclusion\n...",
-#     "status": "writing_complete"
-# }
+            elapsed = time.time() - start_time
+            print(f"[Writer] COMPLETE LLM report synthesis in {elapsed:.2f}s")
+            
+            return {
+                "report": final_content,
+                "status": "writing_complete"
+            }
+            
+        except Exception as e:
+            error_str = str(e).lower()
+            is_retryable = "503" in error_str or "unavailable" in error_str or "connection" in error_str or "timeout" in error_str
+            
+            if is_retryable and attempt < max_retries:
+                print(f"[Writer] Warning: LLM call failed with retryable error (attempt {attempt}/{max_retries}). Waiting 3s... Error: {str(e)}")
+                time.sleep(3)
+                continue
+                
+            elapsed = time.time() - start_time if 'start_time' in locals() else 0.0
+            error_msg = f"Writer failed to generate report in {elapsed:.2f}s: {str(e)}"
+            print(f"[Writer] FAILED LLM report synthesis after {attempt} attempts: {error_msg}")
+            return {
+                "errors": [error_msg],
+                "status": "writing_failed",
+                "report": "An error occurred during report generation."
+            }
