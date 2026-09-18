@@ -1,83 +1,98 @@
-```text
- ____                 _____                     
-|  _ \  ___  ___ _ __|_   _| __ __ _  ___ ___ 
-| | | |/ _ \/ _ \ '_ \ | || '__/ _` |/ __/ _ \
-| |_| |  __/  __/ |_) || || | | (_| | (_|  __/
-|____/ \___|\___| .__/ |_||_|  \__,_|\___\___|
-                |_|                           
+# ResearchGPT 🔬
+**Autonomous Multi-Agent Intelligence Engine**
+
+![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
+![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=flat&logo=fastapi)
+![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=flat&logo=streamlit&logoColor=white)
+![LangGraph](https://img.shields.io/badge/LangGraph-Production-green)
+![Qdrant](https://img.shields.io/badge/Qdrant-Vector_DB-red)
+![Google Gemini](https://img.shields.io/badge/Google_Gemini-3.8_Flash-blue)
+
+## Overview
+
+**ResearchGPT** is an enterprise-grade, multi-agent AI research system designed to autonomously synthesize academic-quality reports. Bypassing the limitations of superficial web searches and single-shot LLM prompts, ResearchGPT employs a sophisticated, cyclic LangGraph orchestration pipeline. It autonomously plans sub-queries, filters domains, extracts dense factual context, rigorously grades its own findings against Ragas-style metrics, and dynamically self-corrects until its strict quality thresholds are met. 
+
+The result is a deeply analytical, heavily cited, and structurally flawless Markdown report generated exclusively from high-trust sources.
+
+## System Architecture
+
+ResearchGPT relies on a multi-agent state machine orchestrated by LangGraph, with robust state persistence in PostgreSQL and vector storage in Qdrant.
+
+```mermaid
+flowchart TD
+    %% Define Styles
+    classDef user fill:#2d3436,stroke:#dfe6e9,stroke-width:2px,color:#fff
+    classDef api fill:#0984e3,stroke:#74b9ff,stroke-width:2px,color:#fff
+    classDef agent fill:#00b894,stroke:#55efc4,stroke-width:2px,color:#fff
+    classDef db fill:#e17055,stroke:#fab1a0,stroke-width:2px,color:#fff
+    classDef external fill:#6c5ce7,stroke:#a29bfe,stroke-width:2px,color:#fff
+
+    User[User Input (Streamlit UI)]:::user --> API[FastAPI Backend]:::api
+    API --> State[LangGraph State]:::api
+    API --> Postgres[(PostgreSQL Task Management)]:::db
+    
+    State --> Planner[Planner Node]:::agent
+    Planner --> Search[Search Node]:::agent
+    Search <--> Providers[Tavily / DuckDuckGo]:::external
+    Search --> Retriever[Retriever Node]:::agent
+    Retriever <--> Qdrant[(Qdrant Vector DB)]:::db
+    Retriever --> Critic[Critic Node]:::agent
+    
+    Critic -->|Score < 0.75| Optimizer[Query Optimizer Node]:::agent
+    Optimizer --> Search
+    
+    Critic -->|Score >= 0.75| Writer[Writer Node]:::agent
+    Writer --> FinalReport[Structured Markdown Report]:::api
+    Writer --> API
 ```
 
-# DeepTrace
-**LangGraph-powered Multi-Agent Research System**
+## Core Features
 
-![Python](https://img.shields.io/badge/Python-3.13-blue?style=for-the-badge&logo=python)
-![LangGraph](https://img.shields.io/badge/LangGraph-0.1.0-green?style=for-the-badge)
-![LangChain](https://img.shields.io/badge/LangChain-0.2.0-darkgreen?style=for-the-badge)
-![Qdrant](https://img.shields.io/badge/Qdrant-VectorDB-red?style=for-the-badge)
-
-## What is DeepTrace?
-DeepTrace is a fully autonomous AI research assistant. Given a topic, it orchestrates multiple specialized AI agents to break down the query, scrape the web, build a local vector database, evaluate the quality of its own research, self-correct if needed, and synthesize a hallucination-free markdown report with citations.
-
-## Current Architecture
-
-```text
-[START]
-   ↓
-[Planner]     <-- Breaks query into sub-questions
-   ↓
-[Search] <─────────────────────────────┐
-   ↓                                   │
-[Qdrant(RAG)] <-- Indexes embeddings   │ (loops if quality<7)
-   ↓                                   │
-[Retriever]   <-- Extracts Top-K       │
-   ↓                                   │
-[Critic]      <-- Evaluates Quality ───┘
-   │               
-   ├── [Decision: APPROVED]
-   ↓
-[Writer]      <-- Synthesizes final report
-   ↓
-[Report]
-```
+*   **Multi-Agent Orchestration (LangGraph):** A deeply cyclic state machine (Planner → Search → Retriever → Critic → Optimizer/Writer) ensuring high-fidelity research through iterative self-correction.
+*   **Trust-Tier Domain Filtering:** Aggressive up-stream domain filtering guarantees low-quality homework sites (e.g., Brainly, Quora) are explicitly blocked, pulling context exclusively from academic, policy, and journalistic domains.
+*   **Multi-Key API Rotation:** Natively routes around free-tier `429 RESOURCE_EXHAUSTED` quota limits by seamlessly load-balancing requests across an array of fallback Google API keys.
+*   **SmartRetry Mechanics:** Custom tenacity decorators protect the pipeline from temporary `503/504` server spikes, executing targeted 3-second wait/retries before failover without interrupting the larger workflow.
+*   **Graceful Degradation:** The pipeline tracks iteration cycles and gracefully degrades to partial synthesis if maximum research depth is exhausted, preventing infinite loops and hallucinations.
+*   **Native PDF Export:** The Streamlit frontend supports single-click compilation of Markdown synthesis into highly formatted PDF deliverables.
 
 ## Tech Stack
-| Component | Technology | Purpose |
-| --- | --- | --- |
-| **Orchestration** | LangGraph | Manages agent states and cyclic conditional routing |
-| **Agents** | LangChain Core | Constructs LLM chains and structured outputs |
-| **LLMs** | OpenRouter (Mistral/Llama) | Provides intelligent reasoning and synthesis |
-| **Search Engine** | DuckDuckGo API | Fetches live, up-to-date web data |
-| **Vector DB** | Qdrant | Stores embeddings for semantic search |
-| **Embeddings** | FastEmbed (BGE-Small) | Generates local, free, CPU-bound vectors |
-| **Validation** | Pydantic | Enforces strict JSON schemas for LLM outputs |
 
-## Project Status
+*   **Backend Interface:** FastAPI, SQLAlchemy, PostgreSQL
+*   **AI & Orchestration:** LangGraph, LangChain, Google Gemini API (gemini-3.8-flash)
+*   **Search & Vectorization:** Tavily Search API, DuckDuckGo (Fallback), Qdrant Vector Database
+*   **Frontend UI:** Streamlit, fpdf2, markdown
 
-✅ **Phase 1: LangGraph Pipeline (Planner+Search+Writer)**
-✅ **Phase 2: RAG + Qdrant Vector DB**
-✅ **Phase 3: Critic Agent + Conditional Routing**
-🔄 **Phase 4-8: Coming soon**
+## Setup & Installation
 
-## How to Run Right Now
+**1. Clone & Install Dependencies:**
+```bash
+git clone https://github.com/your-org/ResearchGPT.git
+cd ResearchGPT
+python -m venv venv
+# Windows
+venv\Scripts\activate
+# Linux/Mac
+source venv/bin/activate
 
-1. **Install Requirements:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+pip install -r requirements.txt
+```
 
-2. **Set API Key:**
-   Create a `.env` file in the root directory and add your OpenRouter API key:
-   ```text
-   OPENROUTER_API_KEY="your_api_key_here"
-   ```
+**2. Configure Environment Variables:**
+Create a `.env` file in the root directory:
+```env
+GOOGLE_API_KEYS="your_key_1,your_key_2"
+TAVILY_API_KEY="your_tavily_key"
+DATABASE_URL="postgresql://user:password@localhost/deeptrace"
+```
 
-3. **Execute Pipeline:**
-   ```bash
-   python main.py
-   ```
+**3. Initialize the Backend Services:**
+Ensure PostgreSQL is running locally, then launch the FastAPI server:
+```bash
+uvicorn app.api.main:app --reload --port 8000
+```
 
-## Expected Output
-When you run the script, you will see real-time streaming logs as LangGraph moves between the Planner, Search, Retriever, and Critic nodes. You will see the Critic score the research and potentially trigger a retry loop (`--- CYCLE #2 ---`) if the score is below the threshold. The execution ends with a statistical summary (Search Loops, Sources Found, Docs Retrieved, Final Quality) followed by a formatted markdown report with inline citations based strictly on the retrieved context.
-
----
-**GitHub:** [github.com/rajatrgupta/DeepTrace](https://github.com/rajatrgupta/DeepTrace)
+**4. Launch the Enterprise Interface:**
+Open a new terminal window, activate the virtual environment, and run:
+```bash
+streamlit run app/frontend/app.py
+```
