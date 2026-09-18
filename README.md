@@ -33,9 +33,9 @@ flowchart TD
     
     State --> Planner["Planner Node"]:::agent
     Planner --> Search["Search Node"]:::agent
-    Search <--> Providers["Tavily / DuckDuckGo"]:::external
+    Providers["Tavily / DuckDuckGo"]:::external --> Search
     Search --> Retriever["Retriever Node"]:::agent
-    Retriever <--> Qdrant[("Qdrant Vector DB")]:::db
+    Qdrant[("Qdrant Vector DB")]:::db --> Retriever
     Retriever --> Critic["Critic Node"]:::agent
     
     Critic -->|"Score < 0.75"| Optimizer["Query Optimizer Node"]:::agent
@@ -43,7 +43,6 @@ flowchart TD
     
     Critic -->|"Score >= 0.75"| Writer["Writer Node"]:::agent
     Writer --> FinalReport["Structured Markdown Report"]:::api
-    Writer --> API
 ```
 
 ## Core Features
