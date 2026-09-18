@@ -27,22 +27,22 @@ flowchart TD
     classDef db fill:#e17055,stroke:#fab1a0,stroke-width:2px,color:#fff
     classDef external fill:#6c5ce7,stroke:#a29bfe,stroke-width:2px,color:#fff
 
-    User[User Input (Streamlit UI)]:::user --> API[FastAPI Backend]:::api
-    API --> State[LangGraph State]:::api
-    API --> Postgres[(PostgreSQL Task Management)]:::db
+    User["User Input (Streamlit UI)"]:::user --> API["FastAPI Backend"]:::api
+    API --> State["LangGraph State"]:::api
+    API --> Postgres[("PostgreSQL Task Management")]:::db
     
-    State --> Planner[Planner Node]:::agent
-    Planner --> Search[Search Node]:::agent
-    Search <--> Providers[Tavily / DuckDuckGo]:::external
-    Search --> Retriever[Retriever Node]:::agent
-    Retriever <--> Qdrant[(Qdrant Vector DB)]:::db
-    Retriever --> Critic[Critic Node]:::agent
+    State --> Planner["Planner Node"]:::agent
+    Planner --> Search["Search Node"]:::agent
+    Search <--> Providers["Tavily / DuckDuckGo"]:::external
+    Search --> Retriever["Retriever Node"]:::agent
+    Retriever <--> Qdrant[("Qdrant Vector DB")]:::db
+    Retriever --> Critic["Critic Node"]:::agent
     
-    Critic -->|Score < 0.75| Optimizer[Query Optimizer Node]:::agent
+    Critic -->|"Score < 0.75"| Optimizer["Query Optimizer Node"]:::agent
     Optimizer --> Search
     
-    Critic -->|Score >= 0.75| Writer[Writer Node]:::agent
-    Writer --> FinalReport[Structured Markdown Report]:::api
+    Critic -->|"Score >= 0.75"| Writer["Writer Node"]:::agent
+    Writer --> FinalReport["Structured Markdown Report"]:::api
     Writer --> API
 ```
 
