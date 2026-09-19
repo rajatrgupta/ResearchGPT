@@ -60,29 +60,37 @@ def get_llm() -> dict:
     if not api_keys:
         raise ValueError("No valid API keys found in the environment variables.")
         
-    # Instantiate a model for each API key using our custom retry subclass
+    # Instantiate a model for each API key and each model variant
+    models_to_try = [
+        "gemini-3.8-flash",
+        "gemini-3.7-flash",
+        "gemini-2.5-flash",
+        "gemini-1.5-flash"
+    ]
+    
     llm_instances = []
     for key in api_keys:
-        llm = SmartRetryChatGoogleGenerativeAI(
-            model="gemini-1.5-flash",
-            api_key=key,
-            temperature=0.2,
-            max_retries=0, # Fail fast on 429 quota exhaustion to immediately route to the next key
-            timeout=15.0
-        )
-        llm_instances.append(llm)
-        
-    # The first key is the primary LLM; all subsequent keys are fallbacks
+        for model_name in models_to_try:
+            llm = SmartRetryChatGoogleGenerativeAI(
+                model=model_name,
+                api_key=key,
+                temperature=0.2,
+                max_retries=0, # Fail fast on 429 quota exhaustion or 404 to immediately route to the next
+                timeout=15.0
+            )
+            llm_instances.append(llm)
+            
+    # The first model/key combo is primary; all subsequent are fallbacks
     primary_llm = llm_instances[0]
     fallbacks = llm_instances[1:]
     
     if fallbacks:
         # Chain models together using LangChain's native fallback routing
         robust_llm = primary_llm.with_fallbacks(fallbacks)
-        model_used_str = f"Google Gemini (1.5-flash) with {len(api_keys)} rotating keys (SmartRetry enabled)"
+        model_used_str = f"Google Gemini ({len(models_to_try)} models) with {len(api_keys)} rotating keys"
     else:
         robust_llm = primary_llm
-        model_used_str = "Google Gemini (1.5-flash) single key (SmartRetry enabled)"
+        model_used_str = "Google Gemini single key"
     
     return {
         "llm": robust_llm,
