@@ -117,7 +117,23 @@ def build_graph():
     # 3. Define the Flow (Edges)
     # Standard linear entry path
     workflow.add_edge(START, "planner")
-    workflow.add_edge("planner", "search")
+    
+    # RAG UPGRADE: Stop execution early if Planner fails
+    def route_after_planner(state: ResearchState) -> str:
+        if state.get("status") == "planning_failed":
+            print("\n[Workflow] Halting execution: Planner failed to generate sub-questions.")
+            return END
+        return "search"
+        
+    workflow.add_conditional_edges(
+        "planner",
+        route_after_planner,
+        {
+            END: END,
+            "search": "search"
+        }
+    )
+    
     workflow.add_edge("search", "retriever")
     workflow.add_edge("retriever", "critic")
     
