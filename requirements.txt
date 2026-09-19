@@ -26,8 +26,8 @@ alembic>=1.13.0
 fastapi>=0.100.0
 uvicorn>=0.20.0
 
-
-
+langchain-google-genai>=1.0.0
+huggingface-hub
 # Frontend & UI
 streamlit
 markdown
