@@ -26,3 +26,5 @@ alembic>=1.13.0
 # Web Framework & Server
 fastapi>=0.100.0
 uvicorn>=0.20.0
+
+langchain-google-genai
