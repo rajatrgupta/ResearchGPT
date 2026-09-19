@@ -63,13 +63,13 @@ from qdrant_client.models import (
     FieldCondition,
     MatchValue,
 )
-from fastembed import TextEmbedding
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 # ==========================================
 # CONFIGURATION CONSTANTS
 # ==========================================
-EMBEDDING_MODEL_NAME = "BAAI/bge-small-en-v1.5"
-VECTOR_SIZE = 384
+EMBEDDING_MODEL_NAME = "models/embedding-001"
+VECTOR_SIZE = 768
 
 
 _client = None
@@ -86,16 +86,14 @@ def get_qdrant_client() -> QdrantClient:
     return _client
 
 
-def get_embedding_model() -> TextEmbedding:
+def get_embedding_model() -> GoogleGenerativeAIEmbeddings:
     """
-    Lazy loads the TextEmbedding model using a Singleton pattern.
-    The FastEmbed model (~380MB) is only loaded from disk once per process.
-    Calling this function multiple times within the same run returns the
-    already-loaded instance, preventing redundant memory allocation and I/O.
+    Lazy loads the GoogleGenerativeAIEmbeddings model using a Singleton pattern.
+    Uses the API instead of downloading local models, preventing OOM crashes on Render.
     """
     global _embedding_model
     if _embedding_model is None:
-        _embedding_model = TextEmbedding(model_name=EMBEDDING_MODEL_NAME)
+        _embedding_model = GoogleGenerativeAIEmbeddings(model=EMBEDDING_MODEL_NAME)
     return _embedding_model
 
 
@@ -175,12 +173,12 @@ def store_documents(
         # Extract the raw text (snippets) that we want to embed for semantic search
         texts = [doc.get("snippet", "") for doc in documents]
 
-        # Generate embeddings locally using fastembed.
-        embeddings_generator = embedding_model.embed(texts)
+        # Generate embeddings using Google GenAI API.
+        embeddings = embedding_model.embed_documents(texts)
 
         points = []
         # Loop over our documents and their corresponding newly-generated vectors
-        for doc, vector in zip(documents, embeddings_generator):
+        for doc, vector in zip(documents, embeddings):
             point_id = str(uuid.uuid4())
 
             # Phase 4B: Stamp run_id and cycle onto the payload without mutating
@@ -193,7 +191,7 @@ def store_documents(
 
             point = PointStruct(
                 id=point_id,
-                vector=vector.tolist(),  # Convert numpy array to standard Python list
+                vector=vector,           # It is already a standard Python list from LangChain
                 payload=payload          # Store all metadata including run/cycle tags
             )
             points.append(point)
@@ -240,7 +238,7 @@ def search_similar(
         embedding_model = get_embedding_model()
 
         # 1. Convert the query text into its vector representation
-        query_vector = list(embedding_model.embed([query]))[0]
+        query_vector = embedding_model.embed_query(query)
 
         # 2. Build the optional run-level payload filter
         query_filter = None
@@ -257,7 +255,7 @@ def search_similar(
         # 3. Perform the semantic similarity search in Qdrant
         search_result = client.query_points(
             collection_name=collection_name,
-            query=query_vector.tolist(),
+            query=query_vector,
             query_filter=query_filter,
             limit=limit,
             with_payload=True

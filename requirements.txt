@@ -12,7 +12,6 @@ tavily-python>=0.5.0
 # Vector Database
 qdrant-client>=1.9.0
 langchain-qdrant>=0.1.0
-fastembed>=0.2.7
 
 # Data Validation & Utilities
 pydantic>=2.0.0
