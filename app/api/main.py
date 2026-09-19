@@ -11,7 +11,7 @@ from app.database.models import ResearchRun
 from app.services.research_service import execute_research_run
 
 app = FastAPI(
-    title="DeepTrace API",
+    title="ResearchGPT API",
     description="Autonomous Multi-Agent Research System API",
     version="1.0.0"
 )
