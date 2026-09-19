@@ -22,3 +22,7 @@ python-dotenv>=1.0.0
 sqlalchemy>=2.0.0
 psycopg2-binary>=2.9.0
 alembic>=1.13.0
+
+# Web Framework & Server
+fastapi>=0.100.0
+uvicorn>=0.20.0
