@@ -63,13 +63,13 @@ from qdrant_client.models import (
     FieldCondition,
     MatchValue,
 )
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_community.embeddings import HuggingFaceEndpointEmbeddings
 
 # ==========================================
 # CONFIGURATION CONSTANTS
 # ==========================================
-EMBEDDING_MODEL_NAME = "models/embedding-001"
-VECTOR_SIZE = 768
+EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+VECTOR_SIZE = 384
 
 
 _client = None
@@ -86,15 +86,19 @@ def get_qdrant_client() -> QdrantClient:
     return _client
 
 
-def get_embedding_model() -> GoogleGenerativeAIEmbeddings:
+def get_embedding_model() -> HuggingFaceEndpointEmbeddings:
     """
-    Lazy loads the GoogleGenerativeAIEmbeddings model using a Singleton pattern.
+    Lazy loads the HuggingFaceEndpointEmbeddings model using a Singleton pattern.
     Uses the API instead of downloading local models, preventing OOM crashes on Render.
     """
     global _embedding_model
     if _embedding_model is None:
-        api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-        _embedding_model = GoogleGenerativeAIEmbeddings(model=EMBEDDING_MODEL_NAME, google_api_key=api_key)
+        hf_token = os.environ.get("HF_TOKEN") or "hf_your_fallback_token_if_needed"
+        _embedding_model = HuggingFaceEndpointEmbeddings(
+            model=EMBEDDING_MODEL_NAME,
+            task="feature-extraction",
+            huggingfacehub_api_token=hf_token,
+        )
     return _embedding_model
 
 
