@@ -1,5 +1,5 @@
 """
-Database Connection Management for DeepTrace Phase 5
+Database Connection Management for ResearchGPT
 
 Provides the SQLAlchemy synchronous engine and sessionmaker.
 Uses psycopg2 driver for robust, synchronous database access.
@@ -13,19 +13,25 @@ from dotenv import load_dotenv
 # Ensure environment variables are loaded for DB connections
 load_dotenv()
 
-# Safely build connection URL using SQLAlchemy URL.create()
-# This guarantees that special characters in passwords (e.g., @, /, #) are properly URL-encoded.
-DATABASE_URL = URL.create(
-    drivername="postgresql+psycopg2",
-    username=os.environ.get("POSTGRES_USER", "deeptrace"),
-    password=os.environ.get("POSTGRES_PASSWORD", "deeptrace_password"),
-    host=os.environ.get("POSTGRES_HOST", "localhost"),
-    port=os.environ.get("POSTGRES_PORT", "5432"),
-    database=os.environ.get("POSTGRES_DB", "deeptrace_db")
-)
+# Check if Render's DATABASE_URL is present
+db_url_env = os.environ.get("DATABASE_URL")
+
+if db_url_env:
+    # Render provides 'postgres://', but SQLAlchemy+psycopg2 needs 'postgresql+psycopg2://'
+    DATABASE_URL = db_url_env.replace("postgres://", "postgresql+psycopg2://")
+else:
+    # Local development fallback
+    DATABASE_URL = URL.create(
+        drivername="postgresql+psycopg2",
+        username=os.environ.get("POSTGRES_USER", "deeptrace"),
+        password=os.environ.get("POSTGRES_PASSWORD", "deeptrace_password"),
+        host=os.environ.get("POSTGRES_HOST", "localhost"),
+        port=os.environ.get("POSTGRES_PORT", "5432"),
+        database=os.environ.get("POSTGRES_DB", "deeptrace_db")
+    )
 
 # Create the SQLAlchemy engine
-# pool_pre_ping=True gracefully handles stale/dropped connections by verifying them before checkout
+# pool_pre_ping=True gracefully handles stale/dropped connections
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
 # Configured "Session" factory
