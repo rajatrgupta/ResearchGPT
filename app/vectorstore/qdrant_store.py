@@ -93,7 +93,8 @@ def get_embedding_model() -> GoogleGenerativeAIEmbeddings:
     """
     global _embedding_model
     if _embedding_model is None:
-        _embedding_model = GoogleGenerativeAIEmbeddings(model=EMBEDDING_MODEL_NAME)
+        api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        _embedding_model = GoogleGenerativeAIEmbeddings(model=EMBEDDING_MODEL_NAME, google_api_key=api_key)
     return _embedding_model
 
 
