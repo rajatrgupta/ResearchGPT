@@ -43,7 +43,7 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = DATABASE_URL.render_as_string(hide_password=False)
+    url = DATABASE_URL if isinstance(DATABASE_URL, str) else DATABASE_URL.render_as_string(hide_password=False)
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -63,7 +63,7 @@ def run_migrations_online() -> None:
 
     """
     section = config.get_section(config.config_ini_section, {})
-    section["sqlalchemy.url"] = DATABASE_URL.render_as_string(hide_password=False)
+    section["sqlalchemy.url"] = DATABASE_URL if isinstance(DATABASE_URL, str) else DATABASE_URL.render_as_string(hide_password=False)
     
     connectable = engine_from_config(
         section,
