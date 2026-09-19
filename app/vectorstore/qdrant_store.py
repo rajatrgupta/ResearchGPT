@@ -63,8 +63,7 @@ from qdrant_client.models import (
     FieldCondition,
     MatchValue,
 )
-from langchain_community.embeddings import HuggingFaceEndpointEmbeddings
-
+from langchain_huggingface import HuggingFaceEndpointEmbeddings
 # ==========================================
 # CONFIGURATION CONSTANTS
 # ==========================================

@@ -33,3 +33,5 @@ streamlit
 markdown
 fpdf2
 requests
+
+langchain-huggingface
