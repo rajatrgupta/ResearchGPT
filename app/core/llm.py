@@ -64,7 +64,7 @@ def get_llm() -> dict:
     llm_instances = []
     for key in api_keys:
         llm = SmartRetryChatGoogleGenerativeAI(
-            model="gemini-3.8-flash",
+            model="gemini-1.5-flash",
             api_key=key,
             temperature=0.2,
             max_retries=0, # Fail fast on 429 quota exhaustion to immediately route to the next key
@@ -79,10 +79,10 @@ def get_llm() -> dict:
     if fallbacks:
         # Chain models together using LangChain's native fallback routing
         robust_llm = primary_llm.with_fallbacks(fallbacks)
-        model_used_str = f"Google Gemini (3.8-flash) with {len(api_keys)} rotating keys (SmartRetry enabled)"
+        model_used_str = f"Google Gemini (1.5-flash) with {len(api_keys)} rotating keys (SmartRetry enabled)"
     else:
         robust_llm = primary_llm
-        model_used_str = "Google Gemini (3.8-flash) single key (SmartRetry enabled)"
+        model_used_str = "Google Gemini (1.5-flash) single key (SmartRetry enabled)"
     
     return {
         "llm": robust_llm,
