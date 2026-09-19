@@ -354,12 +354,22 @@ class TavilySearchProvider(SearchProvider):
                 include_answer=False,
                 include_raw_content=False,
                 exclude_domains=TAVILY_BLOCKED_DOMAINS,
-                timeout=SEARCH_TIMEOUT, # Native SDK timeout integration
+                timeout=10.0, # Native SDK timeout integration
             )
             if preferred_domains:
                 search_kwargs["include_domains"] = preferred_domains
 
-            response = self._client.search(**search_kwargs)
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(self._client.search, **search_kwargs)
+                try:
+                    response = future.result(timeout=10.0)
+                except concurrent.futures.TimeoutError:
+                    print(f"[TavilySearchProvider] Timeout after 10s for query: {query}")
+                    return []
+                except Exception as e:
+                    print(f"[TavilySearchProvider] Error for query: {query} -> {e}")
+                    return []
 
             results = response.get("results", [])
 
@@ -434,7 +444,18 @@ class DuckDuckGoSearchProvider(SearchProvider):
         try:
             from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
             search_tool = DuckDuckGoSearchAPIWrapper()
-            raw_results = search_tool.results(query, max_results=max_results)
+            
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(search_tool.results, query, max_results=max_results)
+                try:
+                    raw_results = future.result(timeout=10.0)
+                except concurrent.futures.TimeoutError:
+                    print(f"[DuckDuckGoSearchProvider] Timeout after 10s for query: {query}")
+                    return [{"question": query, "title": "Timeout", "snippet": "Search failed or timed out", "source": "timeout"}]
+                except Exception as e:
+                    print(f"[DuckDuckGoSearchProvider] Error for query: {query} -> {e}")
+                    return [{"question": query, "title": "Error", "snippet": "Search failed or timed out", "source": "error"}]
 
             if not isinstance(raw_results, list) or not raw_results:
                 elapsed = time.time() - start_time
@@ -461,7 +482,7 @@ class DuckDuckGoSearchProvider(SearchProvider):
             elapsed = time.time() - start_time
             print(f"[DuckDuckGoSearchProvider] FAILED in {elapsed:.2f}s for query '{query[:60]}...': "
                   f"{type(e).__name__}: {str(e)[:120]}")
-            return []
+            return [{"question": query, "title": "Error", "snippet": "Search failed or timed out", "source": "error"}]
 
 
 # ==========================================
