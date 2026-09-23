@@ -88,6 +88,21 @@ def get_llm() -> dict:
     primary_llm = llm_instances[0]
     fallbacks = llm_instances[1:]
     
+    # Ultimate failover: If Google API is completely down (503ing on all models),
+    # seamlessly fall back to OpenRouter (Llama/Mistral) if the key exists.
+    openrouter_key = os.environ.get("OPENROUTER_API_KEY")
+    if openrouter_key:
+        from langchain_openai import ChatOpenAI
+        for or_model in ["meta-llama/llama-3.1-8b-instruct", "mistralai/mistral-7b-instruct"]:
+            or_llm = ChatOpenAI(
+                model=or_model,
+                api_key=openrouter_key,
+                base_url="https://openrouter.ai/api/v1",
+                temperature=0.2,
+                max_retries=1
+            )
+            fallbacks.append(or_llm)
+    
     if fallbacks:
         # Chain models together using LangChain's native fallback routing
         robust_llm = primary_llm.with_fallbacks(fallbacks)
