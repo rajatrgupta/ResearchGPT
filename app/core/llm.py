@@ -42,10 +42,15 @@ class SmartRetryChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
 # (Planner, Search, Critic, Writer) will all share the exact same configuration, 
 # API keys, and retry logic.
 
-def get_llm() -> dict:
+def get_llm(structured_schema=None) -> dict:
     """
     Initializes and returns a configured LangChain Runnable for Google Gemini.
     
+    Args:
+        structured_schema: Optional Pydantic schema class. If provided, with_structured_output 
+                           will be applied to EACH model in the fallback chain to ensure
+                           fallbacks work seamlessly even for structured outputs.
+                           
     Returns:
         dict: Containing the configured 'llm' and a description of the 'model_used' strategy.
     """
@@ -82,12 +87,14 @@ def get_llm() -> dict:
                 max_retries=0, # Fail fast on 429 quota exhaustion or 404 to immediately route to the next
                 timeout=15.0
             )
+            # If structured_schema is provided, wrap the model immediately
+            if structured_schema:
+                try:
+                    llm = llm.with_structured_output(structured_schema)
+                except Exception:
+                    pass # Some models might not support it, let it fail on invoke
             llm_instances.append(llm)
             
-    # The first model/key combo is primary; all subsequent are fallbacks
-    primary_llm = llm_instances[0]
-    fallbacks = llm_instances[1:]
-    
     # Ultimate failover: If Google API is completely down (503ing on all models),
     # seamlessly fall back to OpenRouter (Llama/Mistral) if the key exists.
     openrouter_key = os.environ.get("OPENROUTER_API_KEY")
@@ -101,12 +108,21 @@ def get_llm() -> dict:
                 temperature=0.2,
                 max_retries=1
             )
-            fallbacks.append(or_llm)
+            if structured_schema:
+                try:
+                    or_llm = or_llm.with_structured_output(structured_schema)
+                except Exception:
+                    pass
+            llm_instances.append(or_llm)
+            
+    # The first model/key combo is primary; all subsequent are fallbacks
+    primary_llm = llm_instances[0]
+    fallbacks = llm_instances[1:]
     
     if fallbacks:
         # Chain models together using LangChain's native fallback routing
         robust_llm = primary_llm.with_fallbacks(fallbacks)
-        model_used_str = f"Google Gemini ({len(models_to_try)} models) with {len(api_keys)} rotating keys"
+        model_used_str = f"Google Gemini ({len(models_to_try)} models) with {len(api_keys)} rotating keys + OpenRouter"
     else:
         robust_llm = primary_llm
         model_used_str = "Google Gemini single key"

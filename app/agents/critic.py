@@ -84,9 +84,8 @@ User Query: {query}
         input_variables=["query", "context"]
     )
 
-    llm_config = get_llm()
-    robust_llm = llm_config["llm"]
-    structured_llm = robust_llm.with_structured_output(CriticEvaluation)
+    llm_config = get_llm(structured_schema=CriticEvaluation)
+    structured_llm = llm_config["llm"]
     chain = prompt | structured_llm
 
     try:

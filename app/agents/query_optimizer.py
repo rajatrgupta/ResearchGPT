@@ -82,11 +82,8 @@ Rules for new queries:
     )
     
     # Initialize the centralized, fault-tolerant LLM
-    llm_config = get_llm()
-    robust_llm = llm_config["llm"]
-
-    # Bind our Pydantic schema to the LLM to enforce exactly 3 string outputs
-    structured_llm = robust_llm.with_structured_output(QueryOptimizationResult)
+    llm_config = get_llm(structured_schema=QueryOptimizationResult)
+    structured_llm = llm_config["llm"]
     
     chain = prompt | structured_llm
     
