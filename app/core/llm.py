@@ -22,8 +22,8 @@ class SmartRetryChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
     protecting the pipeline from random temporary connection spikes.
     """
     @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_fixed(3),
+        stop=stop_after_attempt(5),
+        wait=wait_fixed(5),
         retry=retry_if_exception(is_transient_error),
         reraise=True
     )
@@ -62,10 +62,9 @@ def get_llm() -> dict:
         
     # Instantiate a model for each API key and each model variant
     models_to_try = [
-        "gemini-3.8-flash",
-        "gemini-3.7-flash",
-        "gemini-2.5-flash",
-        "gemini-1.5-flash"
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+        "gemini-1.0-pro"
     ]
     
     llm_instances = []

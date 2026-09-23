@@ -123,11 +123,12 @@ Write the report now:
             
         except Exception as e:
             error_str = str(e).lower()
-            is_retryable = "503" in error_str or "unavailable" in error_str or "connection" in error_str or "timeout" in error_str
+            is_retryable = "503" in error_str or "unavailable" in error_str or "connection" in error_str or "timeout" in error_str or "429" in error_str or "exhausted" in error_str
             
             if is_retryable and attempt < max_retries:
-                print(f"[Writer] Warning: LLM call failed with retryable error (attempt {attempt}/{max_retries}). Waiting 3s... Error: {str(e)}")
-                time.sleep(3)
+                wait_time = 10 * attempt # progressive backoff for rate limits
+                print(f"[Writer] Warning: LLM call failed with retryable error (attempt {attempt}/{max_retries}). Waiting {wait_time}s... Error: {str(e)}")
+                time.sleep(wait_time)
                 continue
                 
             elapsed = time.time() - start_time if 'start_time' in locals() else 0.0

@@ -125,8 +125,8 @@ else:
                         if current_status == "completed":
                             st.session_state.final_report = poll_data.get("final_report")
                         else:
-                            st.error(f"Execution Failed: {poll_data.get('error_message')}")
-                        st.rerun() # Force UI refresh to show tabs
+                            st.session_state.error_message = poll_data.get("error_message")
+                        st.rerun() # Force UI refresh to show tabs or error
                         break
                 time.sleep(2)
             except Exception as e:
@@ -168,3 +168,11 @@ else:
             
         with tab_logs:
             st.code(f"RUN ID: {st.session_state.run_id}\nSTATUS: {st.session_state.status.upper()}\nMODE: AUTONOMOUS_MULTI_AGENT", language="yaml")
+            
+    elif st.session_state.status == "failed":
+        st.error("🚨 Research Synthesis Failed")
+        st.warning(st.session_state.get("error_message", "An unknown error occurred during execution."))
+        st.info("Please check the system logs or try adjusting your research parameters.")
+        
+        with st.expander("System Diagnostic Info"):
+            st.code(f"RUN ID: {st.session_state.run_id}\nSTATUS: FAILED\nERROR: {st.session_state.get('error_message')}", language="yaml")

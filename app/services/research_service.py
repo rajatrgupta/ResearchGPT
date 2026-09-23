@@ -61,11 +61,19 @@ def execute_research_run(run_id: str, query: str):
                 print(f"[Service] Run {run_id} completed node: {node_name}")
 
         # 4. Finalize the run
-        run_record.status = "completed"
+        final_status = current_state.get("status", "completed")
+        if final_status in ["planning_failed", "writing_failed", "error"]:
+            run_record.status = "failed"
+            error_list = current_state.get("errors", [])
+            run_record.error_message = error_list[0] if error_list else f"Graph execution failed with status: {final_status}"
+            print(f"[Service] Run {run_id} failed logically: {run_record.error_message}")
+        else:
+            run_record.status = "completed"
+            print(f"[Service] Run {run_id} completed successfully.")
+            
         run_record.current_stage = "completed"
         run_record.final_report = current_state.get("report", "No report generated.")
         db.commit()
-        print(f"[Service] Run {run_id} completed successfully.")
 
     except Exception as e:
         # Handle catastrophic failures gracefully
