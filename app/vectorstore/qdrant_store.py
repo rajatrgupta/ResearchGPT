@@ -63,11 +63,88 @@ from qdrant_client.models import (
     FieldCondition,
     MatchValue,
 )
-from langchain_huggingface import HuggingFaceEndpointEmbeddings
+class ResilientEmbeddingModel:
+    """
+    Resilient Embedding adapter:
+    1. Primary: FastEmbed (Local, ONNX-accelerated, zero API tokens, no 401/429 limits).
+    2. Fallback: HuggingFace Endpoint (if HF_TOKEN is configured).
+    3. Fallback: Local HuggingFaceEmbeddings.
+    All providers output strictly 384-dimensional dense vectors.
+    """
+    def __init__(self):
+        self._mode = None
+        self._fastembed = None
+        self._hf = None
+        self._hf_local = None
+        self._init_model()
+
+    def _init_model(self):
+        # 1. Primary: FastEmbed
+        try:
+            from fastembed import TextEmbedding
+            print("[Embeddings] Initializing FastEmbed (BAAI/bge-small-en-v1.5)...")
+            self._fastembed = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+            self._mode = "fastembed"
+            print("[Embeddings] FastEmbed initialized successfully.")
+            return
+        except Exception as e:
+            print(f"[Embeddings] FastEmbed initialization unavailable: {e}. Trying HuggingFace fallback...")
+
+        # 2. Secondary: HuggingFace Endpoint (only if real token is provided)
+        hf_token = os.environ.get("HF_TOKEN")
+        if hf_token and not hf_token.startswith("hf_your_fallback"):
+            try:
+                from langchain_huggingface import HuggingFaceEndpointEmbeddings
+                print("[Embeddings] Initializing HuggingFaceEndpointEmbeddings...")
+                self._hf = HuggingFaceEndpointEmbeddings(
+                    model="sentence-transformers/all-MiniLM-L6-v2",
+                    task="feature-extraction",
+                    huggingfacehub_api_token=hf_token,
+                )
+                self._mode = "huggingface"
+                print("[Embeddings] HuggingFaceEndpointEmbeddings initialized successfully.")
+                return
+            except Exception as e:
+                print(f"[Embeddings] HuggingFaceEndpointEmbeddings failed: {e}. Trying local fallback...")
+
+        # 3. Tertiary: Local sentence-transformers
+        try:
+            from langchain_community.embeddings import HuggingFaceEmbeddings
+            print("[Embeddings] Initializing local HuggingFaceEmbeddings...")
+            self._hf_local = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+            self._mode = "sentence_transformers"
+            print("[Embeddings] Local HuggingFaceEmbeddings initialized successfully.")
+            return
+        except Exception as e:
+            print(f"[Embeddings] Local HuggingFaceEmbeddings failed: {e}.")
+
+        raise RuntimeError("No embedding provider could be initialized. Please ensure fastembed is installed.")
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        if not texts:
+            return []
+        if self._mode == "fastembed":
+            return [v.tolist() for v in self._fastembed.embed(texts)]
+        elif self._mode == "huggingface":
+            return self._hf.embed_documents(texts)
+        elif self._mode == "sentence_transformers":
+            return self._hf_local.embed_documents(texts)
+        raise RuntimeError("Embedding model is not initialized.")
+
+    def embed_query(self, query: str) -> List[float]:
+        if self._mode == "fastembed":
+            return list(self._fastembed.embed([query]))[0].tolist()
+        elif self._mode == "huggingface":
+            return self._hf.embed_query(query)
+        elif self._mode == "sentence_transformers":
+            return self._hf_local.embed_query(query)
+        raise RuntimeError("Embedding model is not initialized.")
+
+
 # ==========================================
 # CONFIGURATION CONSTANTS
 # ==========================================
-EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+EMBEDDING_MODEL_NAME = "BAAI/bge-small-en-v1.5"
 VECTOR_SIZE = 384
 
 
@@ -85,19 +162,13 @@ def get_qdrant_client() -> QdrantClient:
     return _client
 
 
-def get_embedding_model() -> HuggingFaceEndpointEmbeddings:
+def get_embedding_model() -> ResilientEmbeddingModel:
     """
-    Lazy loads the HuggingFaceEndpointEmbeddings model using a Singleton pattern.
-    Uses the API instead of downloading local models, preventing OOM crashes on Render.
+    Lazy loads the ResilientEmbeddingModel using a Singleton pattern.
     """
     global _embedding_model
     if _embedding_model is None:
-        hf_token = os.environ.get("HF_TOKEN") or "hf_your_fallback_token_if_needed"
-        _embedding_model = HuggingFaceEndpointEmbeddings(
-            model=EMBEDDING_MODEL_NAME,
-            task="feature-extraction",
-            huggingfacehub_api_token=hf_token,
-        )
+        _embedding_model = ResilientEmbeddingModel()
     return _embedding_model
 
 
@@ -120,8 +191,12 @@ def create_collection(collection_name: str = "deeptrace_research") -> None:
         else:
             print(f"Collection '{collection_name}' already exists. Skipping creation.")
     except Exception as e:
-        print(f"Error creating collection '{collection_name}': {e}")
-        raise
+        error_msg = str(e).lower()
+        if "already exists" in error_msg or "bad parameter" in error_msg or "api misuse" in error_msg:
+            print(f"Collection '{collection_name}' likely created by another concurrent thread. Proceeding.")
+        else:
+            print(f"Error creating collection '{collection_name}': {e}")
+            raise
 
 def reset_collection(collection_name: str = "deeptrace_research") -> None:
     """

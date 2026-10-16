@@ -55,26 +55,25 @@ def get_llm(structured_schema=None) -> dict:
         dict: Containing the configured 'llm' and a description of the 'model_used' strategy.
     """
     
-    # Fetch the comma-separated list of keys, falling back to singular for backward compatibility
-    api_keys_str = os.environ.get("GOOGLE_API_KEYS") or os.environ.get("GOOGLE_API_KEY")
-    if not api_keys_str:
-        raise ValueError("GOOGLE_API_KEYS or GOOGLE_API_KEY environment variable is not set.")
-        
-    api_keys = [k.strip() for k in api_keys_str.split(",") if k.strip()]
+    openrouter_key = os.environ.get("OPENROUTER_API_KEY")
     
-    if not api_keys:
-        raise ValueError("No valid API keys found in the environment variables.")
+    api_keys_str = (
+        os.environ.get("GOOGLE_API_KEYS")
+        or os.environ.get("GOOGLE_API_KEY")
+        or os.environ.get("GEMINI_API_KEY")
+        or os.environ.get("GEMINI_API_KEYS")
+    )
+    api_keys = [k.strip() for k in api_keys_str.split(",") if k.strip()] if api_keys_str else []
+    
+    if not api_keys and not openrouter_key:
+        raise ValueError("Neither Google Gemini API key (GOOGLE_API_KEYS / GOOGLE_API_KEY / GEMINI_API_KEY) nor OPENROUTER_API_KEY is set.")
         
-    # Instantiate a model for each API key and each model variant
+    # Instantiate active models for each API key
     models_to_try = [
         "gemini-3.8-flash",
         "gemini-3.5-flash",
-        "gemini-2.5-flash",
-        "gemini-1.5-flash-latest",
-        "gemini-1.5-flash-002",
-        "gemini-1.5-flash-001",
-        "gemini-1.5-pro-latest",
-        "gemini-pro"
+        "gemini-flash-latest",
+        "gemini-pro-latest"
     ]
     
     llm_instances = []
@@ -97,7 +96,6 @@ def get_llm(structured_schema=None) -> dict:
             
     # Ultimate failover: If Google API is completely down (503ing on all models),
     # seamlessly fall back to OpenRouter (Llama/Mistral) if the key exists.
-    openrouter_key = os.environ.get("OPENROUTER_API_KEY")
     if openrouter_key:
         from langchain_openai import ChatOpenAI
         for or_model in ["meta-llama/llama-3.1-8b-instruct", "mistralai/mistral-7b-instruct"]:
@@ -106,6 +104,8 @@ def get_llm(structured_schema=None) -> dict:
                 api_key=openrouter_key,
                 base_url="https://openrouter.ai/api/v1",
                 temperature=0.2,
+                max_tokens=4096,
+                timeout=30.0,
                 max_retries=1
             )
             if structured_schema:
@@ -115,6 +115,9 @@ def get_llm(structured_schema=None) -> dict:
                     pass
             llm_instances.append(or_llm)
             
+    if not llm_instances:
+        raise ValueError("No valid LLM instances could be initialized.")
+        
     # The first model/key combo is primary; all subsequent are fallbacks
     primary_llm = llm_instances[0]
     fallbacks = llm_instances[1:]
@@ -122,10 +125,10 @@ def get_llm(structured_schema=None) -> dict:
     if fallbacks:
         # Chain models together using LangChain's native fallback routing
         robust_llm = primary_llm.with_fallbacks(fallbacks)
-        model_used_str = f"Google Gemini ({len(models_to_try)} models) with {len(api_keys)} rotating keys + OpenRouter"
+        model_used_str = f"Google Gemini ({len(models_to_try)} models) with {len(api_keys)} rotating keys + OpenRouter fallback"
     else:
         robust_llm = primary_llm
-        model_used_str = "Google Gemini single key"
+        model_used_str = "Single LLM instance"
     
     return {
         "llm": robust_llm,

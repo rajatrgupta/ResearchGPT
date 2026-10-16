@@ -17,8 +17,13 @@ load_dotenv()
 db_url_env = os.environ.get("DATABASE_URL")
 
 if db_url_env:
-    # Render provides 'postgres://', but SQLAlchemy+psycopg2 needs 'postgresql+psycopg2://'
-    DATABASE_URL = db_url_env.replace("postgres://", "postgresql+psycopg2://")
+    # Render provides 'postgres://' or 'postgresql://', but SQLAlchemy+psycopg2 needs 'postgresql+psycopg2://'
+    if db_url_env.startswith("postgres://"):
+        DATABASE_URL = db_url_env.replace("postgres://", "postgresql+psycopg2://", 1)
+    elif db_url_env.startswith("postgresql://") and "+psycopg2" not in db_url_env:
+        DATABASE_URL = db_url_env.replace("postgresql://", "postgresql+psycopg2://", 1)
+    else:
+        DATABASE_URL = db_url_env
 else:
     # Local development fallback
     DATABASE_URL = URL.create(

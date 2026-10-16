@@ -24,8 +24,10 @@ def generate_pdf(md_text):
     
     return bytes(pdf.output())
 
+import os
+
 # Backend API Configuration
-API_BASE_URL = "https://researchgpt-backend-ygh8.onrender.com/api/v1/research"
+API_BASE_URL = os.environ.get("API_BASE_URL", "https://researchgpt-backend-ygh8.onrender.com/api/v1/research")
 
 st.set_page_config(
     page_title="ResearchGPT | AI Research Workspace",
