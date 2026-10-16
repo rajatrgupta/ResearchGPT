@@ -107,10 +107,12 @@ else:
         status_container = st.empty()
         progress_bar = st.progress(0)
         
+        consecutive_errors = 0
         while st.session_state.status not in ["completed", "failed"]:
             try:
-                poll_res = requests.get(f"{API_BASE_URL}/{st.session_state.run_id}")
+                poll_res = requests.get(f"{API_BASE_URL}/{st.session_state.run_id}", timeout=30)
                 if poll_res.status_code == 200:
+                    consecutive_errors = 0
                     poll_data = poll_res.json()
                     current_status = poll_data.get("status")
                     current_stage = poll_data.get("current_stage", "initialized")
@@ -130,10 +132,16 @@ else:
                             st.session_state.error_message = poll_data.get("error_message")
                         st.rerun() # Force UI refresh to show tabs or error
                         break
-                time.sleep(2)
+                elif poll_res.status_code == 429:
+                    time.sleep(5)
+                    continue
+                time.sleep(3)
             except Exception as e:
-                st.error(f"Telemetry Error: {e}")
-                break
+                consecutive_errors += 1
+                if consecutive_errors > 10:
+                    st.error(f"Telemetry Error: {e}")
+                    break
+                time.sleep(4)
 
     # Final Output State (Using Tabs for clean UX)
     if st.session_state.status == "completed" and st.session_state.final_report:
