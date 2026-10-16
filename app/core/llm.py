@@ -6,6 +6,9 @@ It uses Google's Gemini models directly via the langchain-google-genai SDK.
 """
 
 import os
+from dotenv import load_dotenv
+load_dotenv()
+
 from langchain_google_genai import ChatGoogleGenerativeAI
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception
 from langchain_core.outputs import ChatResult

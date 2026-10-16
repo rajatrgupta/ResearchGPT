@@ -51,6 +51,9 @@ removing the reset_collection() local-development safeguard.
 """
 
 import os
+from dotenv import load_dotenv
+load_dotenv()
+
 import uuid
 from typing import List, Dict, Any, Optional
 
