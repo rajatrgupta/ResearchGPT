@@ -156,12 +156,12 @@ _embedding_model = None
 
 def get_qdrant_client() -> QdrantClient:
     """
-    Lazy loads the Qdrant client. Uses local disk storage for testing,
-    bypassing the need for a Docker container while persisting data across calls.
+    Lazy loads the Qdrant client. Uses in-memory storage for high speed,
+    zero disk lock contention across concurrent background threads, and minimal resource footprint.
     """
     global _client
     if _client is None:
-        _client = QdrantClient(path="./local_qdrant_storage")
+        _client = QdrantClient(location=":memory:")
     return _client
 
 
