@@ -66,7 +66,8 @@ with st.sidebar:
     query = st.text_area("Topic / Directive", placeholder="e.g., Future of Quantum Computing in Healthcare...", height=120)
     
     st.divider()
-    if st.button("🚀 Initialize Research", type="primary", use_container_width=True):
+    is_processing = st.session_state.status in ["pending", "running"]
+    if st.button("🚀 Initialize Research", type="primary", use_container_width=True, disabled=is_processing):
         if not query:
             st.warning("⚠️ Please provide a research topic.")
         else:
@@ -81,6 +82,7 @@ with st.sidebar:
                         data = response.json()
                         st.session_state.run_id = data["run_id"]
                         st.session_state.status = "pending"
+                        st.rerun()
                     else:
                         st.error(f"Engine Error: {response.text}")
                 except Exception as e:
@@ -106,6 +108,7 @@ else:
         
         status_container = st.empty()
         progress_bar = st.progress(0)
+        start_poll_time = time.time()
         
         consecutive_errors = 0
         while st.session_state.status not in ["completed", "failed"]:
@@ -116,13 +119,21 @@ else:
                     poll_data = poll_res.json()
                     current_status = poll_data.get("status")
                     current_stage = poll_data.get("current_stage", "initialized")
+                    elapsed_seconds = int(time.time() - start_poll_time)
                     
                     # Visual feedback of agent stages
                     stages = {"initialized": 10, "planner": 30, "search": 50, "retriever": 70, "critic": 85, "writer": 95, "completed": 100}
                     progress_bar.progress(stages.get(current_stage, 50))
                     
                     with status_container.container():
-                        st.markdown(f"<div class='status-box'><b>Active Agent:</b> <code>{current_stage.upper()}</code><br><small>Run ID: {st.session_state.run_id}</small></div>", unsafe_allow_html=True)
+                        st.markdown(
+                            f"<div class='status-box'>"
+                            f"<b>Active Agent:</b> <code>{current_stage.upper()}</code> &nbsp;&nbsp;|&nbsp;&nbsp; "
+                            f"<b>Elapsed Time:</b> <code>{elapsed_seconds}s</code><br>"
+                            f"<small>Run ID: {st.session_state.run_id}</small>"
+                            f"</div>",
+                            unsafe_allow_html=True
+                        )
                     
                     if current_status in ["completed", "failed"]:
                         st.session_state.status = current_status

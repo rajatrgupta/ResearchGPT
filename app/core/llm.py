@@ -20,22 +20,14 @@ def is_transient_error(exception: BaseException) -> bool:
 
 class SmartRetryChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
     """
-    Subclass that applies an explicit tenacity retry only for transient 503/504 errors.
-    This allows max_retries=0 to quickly failover on 429 quota errors, while still
-    protecting the pipeline from random temporary connection spikes.
+    Subclass configured to fail fast on errors so LangChain's .with_fallbacks()
+    instantly routes to the next key or model without blocking retry delays.
     """
-    @retry(
-        stop=stop_after_attempt(2),
-        wait=wait_fixed(2),
-        retry=retry_if_exception(is_transient_error),
-        reraise=True
-    )
     def _generate(self, *args, **kwargs) -> ChatResult:
         try:
             return super()._generate(*args, **kwargs)
         except Exception as e:
-            if is_transient_error(e):
-                print(f"[SmartRetry] Detected transient error {type(e).__name__}. Retrying in 2 seconds...")
+            print(f"[LLMFailover] Model {self.model} encountered {type(e).__name__}. Routing to fallback...")
             raise e
 
 # ==========================================
@@ -72,14 +64,10 @@ def get_llm(structured_schema=None) -> dict:
         raise ValueError("Neither Google Gemini API key (GOOGLE_API_KEYS / GOOGLE_API_KEY / GEMINI_API_KEY) nor OPENROUTER_API_KEY is set.")
         
     # Instantiate active models for each API key
+    # Only use fast, stable models to prevent 504 deadline delays
     models_to_try = [
         "gemini-3.5-flash-lite",
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-        "gemini-3.7-flash",
-        "gemini-3.8-flash",
-        "gemini-flash-latest",
-        "gemini-pro-latest"
+        "gemini-3.6-flash"
     ]
     
     llm_instances = []
@@ -89,8 +77,8 @@ def get_llm(structured_schema=None) -> dict:
                 model=model_name,
                 api_key=key,
                 temperature=0.2,
-                max_retries=0, # Fail fast on 429 quota exhaustion or 404 to immediately route to the next
-                timeout=15.0
+                max_retries=0, # Fail fast on 429 quota exhaustion or 504 to immediately route to the next
+                timeout=12.0
             )
             # If structured_schema is provided, wrap the model immediately
             if structured_schema:

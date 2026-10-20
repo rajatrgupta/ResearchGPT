@@ -85,7 +85,18 @@ def start_research(request: ResearchRequest, background_tasks: BackgroundTasks, 
     """
     Accepts a research query, creates a run_id, saves a pending status to DB,
     and triggers the LangGraph execution in the background.
+    Protects 512MB RAM free tier by attaching to existing active runs.
     """
+    # Check if a run is already actively running to prevent multi-job OOM crashes
+    active_run = db.query(ResearchRun).filter(ResearchRun.status == "running").first()
+    if active_run:
+        print(f"[API] Attaching request to existing active run: {active_run.run_id}")
+        return {
+            "message": "Research task already in progress.",
+            "run_id": str(active_run.run_id),
+            "status": active_run.status
+        }
+
     run_id = str(uuid.uuid4())
     
     new_run = ResearchRun(
