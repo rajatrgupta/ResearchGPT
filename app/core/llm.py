@@ -73,8 +73,11 @@ def get_llm(structured_schema=None) -> dict:
         
     # Instantiate active models for each API key
     models_to_try = [
-        "gemini-3.8-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.6-flash",
         "gemini-3.5-flash",
+        "gemini-3.7-flash",
+        "gemini-3.8-flash",
         "gemini-flash-latest",
         "gemini-pro-latest"
     ]

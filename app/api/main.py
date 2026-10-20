@@ -16,6 +16,39 @@ app = FastAPI(
     version="1.0.0"
 )
 
+@app.on_event("startup")
+def cleanup_orphaned_runs():
+    """
+    On server startup, find any runs left in 'running' or 'pending' state
+    from a previous server crash/restart and mark them as failed.
+    Prevents the UI from polling stale orphaned runs indefinitely.
+    """
+    db = SessionLocal()
+    try:
+        orphaned = db.query(ResearchRun).filter(ResearchRun.status.in_(["pending", "running"])).all()
+        if orphaned:
+            print(f"[Startup] Found {len(orphaned)} orphaned runs from previous server session. Marking as failed...")
+            for run in orphaned:
+                run.status = "failed"
+                run.error_message = "Server restarted mid-execution. Please trigger a new research run."
+            db.commit()
+            print("[Startup] Orphaned runs cleaned up successfully.")
+    except Exception as e:
+        print(f"[Startup] Warning: Failed to clean up orphaned runs: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+@app.get("/")
+@app.get("/health")
+def health_check():
+    """Liveliness probe for Render and client health checks."""
+    return {
+        "status": "healthy",
+        "service": "ResearchGPT API",
+        "version": "1.0.0"
+    }
+
 def get_db():
     db = SessionLocal()
     try:

@@ -69,31 +69,63 @@ from qdrant_client.models import (
 class ResilientEmbeddingModel:
     """
     Resilient Embedding adapter:
-    1. Primary: FastEmbed (Local, ONNX-accelerated, zero API tokens, no 401/429 limits).
-    2. Fallback: HuggingFace Endpoint (if HF_TOKEN is configured).
-    3. Fallback: Local HuggingFaceEmbeddings.
-    All providers output strictly 384-dimensional dense vectors.
+    1. Primary: Google Generative AI Cloud Embeddings (Zero RAM footprint, fast, perfect for 512MB Render free tier).
+    2. Fallback: FastEmbed (Local, ONNX-accelerated, zero API tokens, no 401/429 limits).
+    3. Fallback: HuggingFace Endpoint (if HF_TOKEN is configured).
+    4. Fallback: Local HuggingFaceEmbeddings.
     """
     def __init__(self):
         self._mode = None
+        self._google = None
         self._fastembed = None
         self._hf = None
         self._hf_local = None
+        self._vector_size = 384
         self._init_model()
 
+    @property
+    def vector_size(self) -> int:
+        return self._vector_size
+
     def _init_model(self):
-        # 1. Primary: FastEmbed
+        # 1. Primary: Google Generative AI Cloud Embeddings (0 MB RAM, zero ONNX download)
+        api_keys_str = (
+            os.environ.get("GOOGLE_API_KEYS")
+            or os.environ.get("GOOGLE_API_KEY")
+            or os.environ.get("GEMINI_API_KEY")
+            or os.environ.get("GEMINI_API_KEYS")
+        )
+        api_key = api_keys_str.split(",")[0].strip() if api_keys_str else None
+        if api_key:
+            try:
+                from langchain_google_genai import GoogleGenerativeAIEmbeddings
+                print("[Embeddings] Initializing GoogleGenerativeAIEmbeddings (models/gemini-embedding-001)...")
+                self._google = GoogleGenerativeAIEmbeddings(
+                    model="models/gemini-embedding-001",
+                    google_api_key=api_key
+                )
+                # Test query to verify API key and model availability
+                test_vec = self._google.embed_query("warmup")
+                self._vector_size = len(test_vec)
+                self._mode = "google_genai"
+                print(f"[Embeddings] GoogleGenerativeAIEmbeddings initialized successfully (Cloud mode, vector size {self._vector_size}).")
+                return
+            except Exception as e:
+                print(f"[Embeddings] GoogleGenerativeAIEmbeddings failed: {e}. Falling back to FastEmbed...")
+
+        # 2. Secondary Fallback: FastEmbed (Local ONNX)
         try:
             from fastembed import TextEmbedding
             print("[Embeddings] Initializing FastEmbed (BAAI/bge-small-en-v1.5)...")
             self._fastembed = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
             self._mode = "fastembed"
+            self._vector_size = 384
             print("[Embeddings] FastEmbed initialized successfully.")
             return
         except Exception as e:
             print(f"[Embeddings] FastEmbed initialization unavailable: {e}. Trying HuggingFace fallback...")
 
-        # 2. Secondary: HuggingFace Endpoint (only if real token is provided)
+        # 3. Tertiary Fallback: HuggingFace Endpoint (only if real token is provided)
         hf_token = os.environ.get("HF_TOKEN")
         if hf_token and not hf_token.startswith("hf_your_fallback"):
             try:
@@ -105,28 +137,32 @@ class ResilientEmbeddingModel:
                     huggingfacehub_api_token=hf_token,
                 )
                 self._mode = "huggingface"
+                self._vector_size = 384
                 print("[Embeddings] HuggingFaceEndpointEmbeddings initialized successfully.")
                 return
             except Exception as e:
                 print(f"[Embeddings] HuggingFaceEndpointEmbeddings failed: {e}. Trying local fallback...")
 
-        # 3. Tertiary: Local sentence-transformers
+        # 4. Quaternary Fallback: Local sentence-transformers
         try:
             from langchain_community.embeddings import HuggingFaceEmbeddings
             print("[Embeddings] Initializing local HuggingFaceEmbeddings...")
             self._hf_local = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
             self._mode = "sentence_transformers"
+            self._vector_size = 384
             print("[Embeddings] Local HuggingFaceEmbeddings initialized successfully.")
             return
         except Exception as e:
             print(f"[Embeddings] Local HuggingFaceEmbeddings failed: {e}.")
 
-        raise RuntimeError("No embedding provider could be initialized. Please ensure fastembed is installed.")
+        raise RuntimeError("No embedding provider could be initialized.")
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         if not texts:
             return []
-        if self._mode == "fastembed":
+        if self._mode == "google_genai":
+            return self._google.embed_documents(texts)
+        elif self._mode == "fastembed":
             return [v.tolist() for v in self._fastembed.embed(texts)]
         elif self._mode == "huggingface":
             return self._hf.embed_documents(texts)
@@ -135,7 +171,9 @@ class ResilientEmbeddingModel:
         raise RuntimeError("Embedding model is not initialized.")
 
     def embed_query(self, query: str) -> List[float]:
-        if self._mode == "fastembed":
+        if self._mode == "google_genai":
+            return self._google.embed_query(query)
+        elif self._mode == "fastembed":
             return list(self._fastembed.embed([query]))[0].tolist()
         elif self._mode == "huggingface":
             return self._hf.embed_query(query)
@@ -175,18 +213,21 @@ def get_embedding_model() -> ResilientEmbeddingModel:
     return _embedding_model
 
 
-def create_collection(collection_name: str = "deeptrace_research") -> None:
+def create_collection(collection_name: str = "deeptrace_research", vector_size: Optional[int] = None) -> None:
     """
     Creates a new collection in Qdrant if it does not already exist.
+    Dynamically uses the active embedding model's vector size.
     """
     try:
         client = get_qdrant_client()
+        embedding_model = get_embedding_model()
+        v_size = vector_size or embedding_model.vector_size
         if not client.collection_exists(collection_name):
-            print(f"Creating new Qdrant collection: '{collection_name}'...")
+            print(f"Creating new Qdrant collection: '{collection_name}' (vector size {v_size})...")
             client.create_collection(
                 collection_name=collection_name,
                 vectors_config=VectorParams(
-                    size=VECTOR_SIZE,
+                    size=v_size,
                     distance=Distance.COSINE
                 ),
             )
@@ -201,7 +242,7 @@ def create_collection(collection_name: str = "deeptrace_research") -> None:
             print(f"Error creating collection '{collection_name}': {e}")
             raise
 
-def reset_collection(collection_name: str = "deeptrace_research") -> None:
+def reset_collection(collection_name: str = "deeptrace_research", vector_size: Optional[int] = None) -> None:
     """
     Deletes and recreates the collection to ensure a clean state for a new run,
     preventing cross-run contamination while allowing retries to accumulate data safely.
@@ -211,7 +252,7 @@ def reset_collection(collection_name: str = "deeptrace_research") -> None:
         if client.collection_exists(collection_name):
             print(f"Deleting existing Qdrant collection: '{collection_name}' to prevent cross-run contamination...")
             client.delete_collection(collection_name)
-        create_collection(collection_name)
+        create_collection(collection_name, vector_size=vector_size)
     except Exception as e:
         print(f"Error resetting collection: {e}")
 
@@ -244,19 +285,23 @@ def store_documents(
 
     try:
         client = get_qdrant_client()
-
-        # Ensure collection exists before attempting to store vectors
-        if not client.collection_exists(collection_name):
-            print(f"Collection '{collection_name}' does not exist. Creating it now before storing...")
-            create_collection(collection_name)
-
         embedding_model = get_embedding_model()
 
         # Extract the raw text (snippets) that we want to embed for semantic search
         texts = [doc.get("snippet", "") for doc in documents]
 
-        # Generate embeddings using Google GenAI API.
+        # Generate embeddings using active embedding model (Cloud Google or FastEmbed)
         embeddings = embedding_model.embed_documents(texts)
+        if not embeddings:
+            print("No embeddings generated.")
+            return
+
+        detected_size = len(embeddings[0])
+
+        # Ensure collection exists before attempting to store vectors
+        if not client.collection_exists(collection_name):
+            print(f"Collection '{collection_name}' does not exist. Creating it now before storing...")
+            create_collection(collection_name, vector_size=detected_size)
 
         points = []
         # Loop over our documents and their corresponding newly-generated vectors
