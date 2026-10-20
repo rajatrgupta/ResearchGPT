@@ -78,7 +78,7 @@ def get_llm(structured_schema=None) -> dict:
                 api_key=key,
                 temperature=0.2,
                 max_retries=0, # Fail fast on 429 quota exhaustion or 504 to immediately route to the next
-                timeout=12.0
+                timeout=8.0
             )
             # If structured_schema is provided, wrap the model immediately
             if structured_schema:
@@ -88,18 +88,18 @@ def get_llm(structured_schema=None) -> dict:
                     pass # Some models might not support it, let it fail on invoke
             llm_instances.append(llm)
             
-    # Ultimate failover: If Google API is completely down (503ing on all models),
-    # seamlessly fall back to OpenRouter (Llama/Mistral) if the key exists.
+    # Ultimate failover: If Google API is completely down (503/504 on all models),
+    # seamlessly fall back to OpenRouter (GPT-4o-mini / Llama-3.3) if the key exists.
     if openrouter_key:
         from langchain_openai import ChatOpenAI
-        for or_model in ["meta-llama/llama-3.1-8b-instruct", "mistralai/mistral-7b-instruct"]:
+        for or_model in ["openai/gpt-4o-mini", "meta-llama/llama-3.3-70b-instruct"]:
             or_llm = ChatOpenAI(
                 model=or_model,
                 api_key=openrouter_key,
                 base_url="https://openrouter.ai/api/v1",
                 temperature=0.2,
-                max_tokens=4096,
-                timeout=30.0,
+                max_tokens=2048,
+                timeout=20.0,
                 max_retries=1
             )
             if structured_schema:
