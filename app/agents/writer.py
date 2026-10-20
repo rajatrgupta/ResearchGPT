@@ -19,17 +19,26 @@ class ReportOutput(BaseModel):
 
 def format_retrieved_documents(documents: list[Dict[str, Any]]) -> str:
     formatted_context = ""
+    sources_list = []
     for i, doc in enumerate(documents):
         question = doc.get("question", "General Topic")
         title = doc.get("title", "Untitled")
         snippet = doc.get("snippet", "")
-        source = doc.get("source", "No Source")
+        source = doc.get("source") or doc.get("link") or "No Source"
         
         formatted_context += f"--- Source [{i+1}] ---\n"
         formatted_context += f"Related Sub-Question: {question}\n"
         formatted_context += f"Title: {title}\n"
         formatted_context += f"Snippet: {snippet}\n"
         formatted_context += f"Link: {source}\n\n"
+        
+        if source and source != "No Source" and source != "error" and source != "timeout":
+            sources_list.append(f"- [{title}]({source})")
+            
+    if sources_list:
+        formatted_context += "--- AVAILABLE SOURCES FOR INLINE CITATIONS ---\n"
+        formatted_context += "Use these exact Markdown links when citing facts:\n"
+        formatted_context += "\n".join(sources_list) + "\n\n"
         
     return formatted_context
 
@@ -65,13 +74,15 @@ def writer_node(state: ResearchState) -> Dict[str, Any]:
         template="""You are a Tier-1 Strategy Consultant and AI Researcher (like McKinsey or BCG). Your task is to synthesize the retrieved documents into a highly dense, analytical, and professional Markdown report.
 
 STRICT RULES - READ CAREFULLY:
-1. NO FLUFF or FILLER: Never use generic introductory/concluding sentences. Start directly with high-impact insights.
-2. NO REPETITION & STRICT THEMATIC ISOLATION: Never repeat the same concept, theme, or insight across different sections. If you explain a core dynamic (like "centralization") in one section, do NOT repeat it in another. Group related points so each section provides strictly net-new historical depth.
-3. DEEP GRANULARITY: Do not stay at the surface level. Extract and synthesize the deepest possible details from the context (e.g., specific monopolies, named institutions, exact tax policies, or distinct regional dynamics). Contrast these granular details directly.
-4. ADAPT TO MISSING DATA: If you lack sufficient data for a specific topic, DO NOT output a disclaimer like "Insufficient data available." Instead, intelligently synthesize whatever related context you do have, merge the section into a broader heading, or omit the heading entirely so the report flows flawlessly.
-5. CLEAN CITATIONS: You must cite every fact inline using strict Markdown hyperlink formatting. It must look like this: `[Publisher/Site Name](https://...)`. Never dump raw URLs directly into the text.
-6. PROFESSIONAL FORMATTING: Use H2/H3 headers, bullet points for metrics, and bold text for key insights.
-7. EXECUTIVE SYNTHESIS: You must ALWAYS conclude the report with a final section titled "## Executive Synthesis". This must be a brief 2-3 sentence paragraph at the very bottom answering the "So what?" of the research and drawing a final strategic conclusion.
+1. MANDATORY INLINE CITATIONS: Every key claim, metric, and bullet point MUST end with an inline Markdown hyperlink citation formatted strictly as `[[Source Name](URL)]` using the exact links provided in the findings. Uncited claims are strictly forbidden.
+   Example format:
+   - **Genomic Alignment:** Quantum annealing algorithms optimize multigenic alignment latency by up to 40% [[Nature](https://www.nature.com/articles/...)].
+2. NO FLUFF or FILLER: Never use generic introductory/concluding sentences. Start directly with high-impact insights.
+3. NO REPETITION & STRICT THEMATIC ISOLATION: Never repeat the same concept across different sections. Group related points so each section provides strictly net-new depth.
+4. DEEP GRANULARITY: Do not stay at the surface level. Extract specific metrics, named institutions, algorithmic benchmarks, and historical frameworks.
+5. PROFESSIONAL FORMATTING: Use H2/H3 headers, bullet points for metrics, and bold text for key terminology.
+6. EXECUTIVE SYNTHESIS: You must ALWAYS conclude the report with a final section titled "## Executive Synthesis" (a brief 2-3 sentence paragraph answering the "So what?").
+7. REFERENCES SECTION: Append a final "## Key Sources & References" section listing all unique source URLs cited.
 
 Output the final Markdown report directly. Do NOT wrap it in JSON.
 
