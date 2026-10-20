@@ -69,18 +69,18 @@ from qdrant_client.models import (
 class ResilientEmbeddingModel:
     """
     Resilient Embedding adapter:
-    1. Primary: Google Generative AI Cloud Embeddings (Zero RAM footprint, fast, perfect for 512MB Render free tier).
-    2. Fallback: FastEmbed (Local, ONNX-accelerated, zero API tokens, no 401/429 limits).
+    1. Primary: Google Generative AI Cloud Embeddings with multi-key failover (0 MB RAM, fast, perfect for 512MB Render free tier).
+    2. Fallback: FastEmbed (Local, ONNX-accelerated, for local CLI development only).
     3. Fallback: HuggingFace Endpoint (if HF_TOKEN is configured).
-    4. Fallback: Local HuggingFaceEmbeddings.
     """
     def __init__(self):
         self._mode = None
+        self._google_instances = []
         self._google = None
         self._fastembed = None
         self._hf = None
         self._hf_local = None
-        self._vector_size = 384
+        self._vector_size = 3072
         self._init_model()
 
     @property
@@ -88,35 +88,50 @@ class ResilientEmbeddingModel:
         return self._vector_size
 
     def _init_model(self):
-        # 1. Primary: Google Generative AI Cloud Embeddings (0 MB RAM, zero ONNX download)
+        # 1. Primary: Google Generative AI Cloud Embeddings with multi-key rotation
         api_keys_str = (
             os.environ.get("GOOGLE_API_KEYS")
             or os.environ.get("GOOGLE_API_KEY")
             or os.environ.get("GEMINI_API_KEY")
             or os.environ.get("GEMINI_API_KEYS")
         )
-        api_key = api_keys_str.split(",")[0].strip() if api_keys_str else None
-        if api_key:
-            try:
-                from langchain_google_genai import GoogleGenerativeAIEmbeddings
-                print("[Embeddings] Initializing GoogleGenerativeAIEmbeddings (models/gemini-embedding-001)...")
-                self._google = GoogleGenerativeAIEmbeddings(
-                    model="models/gemini-embedding-001",
-                    google_api_key=api_key
-                )
-                # Test query to verify API key and model availability
-                test_vec = self._google.embed_query("warmup")
-                self._vector_size = len(test_vec)
-                self._mode = "google_genai"
-                print(f"[Embeddings] GoogleGenerativeAIEmbeddings initialized successfully (Cloud mode, vector size {self._vector_size}).")
-                return
-            except Exception as e:
-                print(f"[Embeddings] GoogleGenerativeAIEmbeddings failed: {e}. Falling back to FastEmbed...")
+        api_keys = [k.strip() for k in api_keys_str.split(",") if k.strip()] if api_keys_str else []
 
-        # 2. Secondary Fallback: FastEmbed (Local ONNX)
+        from langchain_google_genai import GoogleGenerativeAIEmbeddings
+        for idx, key in enumerate(api_keys):
+            try:
+                emb_instance = GoogleGenerativeAIEmbeddings(
+                    model="models/gemini-embedding-001",
+                    google_api_key=key
+                )
+                test_vec = emb_instance.embed_query("warmup")
+                self._google_instances.append(emb_instance)
+                if not self._google:
+                    self._google = emb_instance
+                    self._vector_size = len(test_vec)
+                    self._mode = "google_genai"
+                print(f"[Embeddings] Google key #{idx+1} verified successfully (Vector size: {len(test_vec)}).")
+            except Exception as e:
+                print(f"[Embeddings] Google key #{idx+1} failed verification: {e}")
+
+        if self._google_instances:
+            print(f"[Embeddings] Initialized {len(self._google_instances)} active Google Generative AI embedding instance(s).")
+            return
+
+        # On Render Free tier (512MB RAM), FastEmbed will cause an instant OOM kernel crash.
+        # Guard against loading heavy ONNX runtimes in constrained cloud environments.
+        is_render = os.environ.get("RENDER") == "true" or os.environ.get("IS_RENDER") == "true"
+        if is_render:
+            raise RuntimeError(
+                "Google Generative AI embeddings failed to initialize on Render. "
+                "FastEmbed local ONNX runtime is blocked on Render to prevent 512MB OOM crash. "
+                "Please verify your GOOGLE_API_KEY / GEMINI_API_KEY in Render environment settings."
+            )
+
+        # 2. Secondary Fallback: FastEmbed (Local ONNX for local CLI development)
         try:
             from fastembed import TextEmbedding
-            print("[Embeddings] Initializing FastEmbed (BAAI/bge-small-en-v1.5)...")
+            print("[Embeddings] Initializing FastEmbed (BAAI/bge-small-en-v1.5) for local execution...")
             self._fastembed = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
             self._mode = "fastembed"
             self._vector_size = 384
@@ -141,19 +156,7 @@ class ResilientEmbeddingModel:
                 print("[Embeddings] HuggingFaceEndpointEmbeddings initialized successfully.")
                 return
             except Exception as e:
-                print(f"[Embeddings] HuggingFaceEndpointEmbeddings failed: {e}. Trying local fallback...")
-
-        # 4. Quaternary Fallback: Local sentence-transformers
-        try:
-            from langchain_community.embeddings import HuggingFaceEmbeddings
-            print("[Embeddings] Initializing local HuggingFaceEmbeddings...")
-            self._hf_local = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-            self._mode = "sentence_transformers"
-            self._vector_size = 384
-            print("[Embeddings] Local HuggingFaceEmbeddings initialized successfully.")
-            return
-        except Exception as e:
-            print(f"[Embeddings] Local HuggingFaceEmbeddings failed: {e}.")
+                print(f"[Embeddings] HuggingFaceEndpointEmbeddings failed: {e}.")
 
         raise RuntimeError("No embedding provider could be initialized.")
 
@@ -161,7 +164,14 @@ class ResilientEmbeddingModel:
         if not texts:
             return []
         if self._mode == "google_genai":
-            return self._google.embed_documents(texts)
+            last_err = None
+            for instance in self._google_instances:
+                try:
+                    return instance.embed_documents(texts)
+                except Exception as e:
+                    last_err = e
+                    continue
+            raise RuntimeError(f"All Google embedding keys failed for embed_documents: {last_err}")
         elif self._mode == "fastembed":
             return [v.tolist() for v in self._fastembed.embed(texts)]
         elif self._mode == "huggingface":
@@ -172,7 +182,14 @@ class ResilientEmbeddingModel:
 
     def embed_query(self, query: str) -> List[float]:
         if self._mode == "google_genai":
-            return self._google.embed_query(query)
+            last_err = None
+            for instance in self._google_instances:
+                try:
+                    return instance.embed_query(query)
+                except Exception as e:
+                    last_err = e
+                    continue
+            raise RuntimeError(f"All Google embedding keys failed for embed_query: {last_err}")
         elif self._mode == "fastembed":
             return list(self._fastembed.embed([query]))[0].tolist()
         elif self._mode == "huggingface":

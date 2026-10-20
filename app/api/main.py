@@ -49,6 +49,21 @@ def health_check():
         "version": "1.0.0"
     }
 
+@app.get("/api/v1/debug-system")
+def debug_system():
+    """Safe diagnostic endpoint to verify model and vectorstore readiness without exposing secrets."""
+    import os
+    from app.vectorstore.qdrant_store import get_embedding_model
+    emb = get_embedding_model()
+    return {
+        "embedding_mode": emb._mode,
+        "vector_size": emb.vector_size,
+        "has_google_key": bool(os.environ.get("GOOGLE_API_KEYS") or os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")),
+        "has_tavily_key": bool(os.environ.get("TAVILY_API_KEY")),
+        "has_openrouter_key": bool(os.environ.get("OPENROUTER_API_KEY")),
+        "has_database_url": bool(os.environ.get("DATABASE_URL"))
+    }
+
 def get_db():
     db = SessionLocal()
     try:
