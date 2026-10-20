@@ -97,6 +97,7 @@ class ResilientEmbeddingModel:
         )
         api_keys = [k.strip() for k in api_keys_str.split(",") if k.strip()] if api_keys_str else []
 
+        verification_errors = []
         from langchain_google_genai import GoogleGenerativeAIEmbeddings
         for idx, key in enumerate(api_keys):
             try:
@@ -112,7 +113,9 @@ class ResilientEmbeddingModel:
                     self._mode = "google_genai"
                 print(f"[Embeddings] Google key #{idx+1} verified successfully (Vector size: {len(test_vec)}).")
             except Exception as e:
-                print(f"[Embeddings] Google key #{idx+1} failed verification: {e}")
+                err_str = f"Key #{idx+1} failed: {type(e).__name__}: {str(e)}"
+                print(f"[Embeddings] {err_str}")
+                verification_errors.append(err_str)
 
         if self._google_instances:
             print(f"[Embeddings] Initialized {len(self._google_instances)} active Google Generative AI embedding instance(s).")
@@ -123,9 +126,9 @@ class ResilientEmbeddingModel:
         is_render = os.environ.get("RENDER") == "true" or os.environ.get("IS_RENDER") == "true"
         if is_render:
             raise RuntimeError(
-                "Google Generative AI embeddings failed to initialize on Render. "
-                "FastEmbed local ONNX runtime is blocked on Render to prevent 512MB OOM crash. "
-                "Please verify your GOOGLE_API_KEY / GEMINI_API_KEY in Render environment settings."
+                f"Google Generative AI embeddings failed on Render (checked {len(api_keys)} keys). "
+                f"Details: {'; '.join(verification_errors) if verification_errors else 'No Google API keys found in environment'}. "
+                "FastEmbed local ONNX runtime is blocked on Render to prevent 512MB OOM crash."
             )
 
         # 2. Secondary Fallback: FastEmbed (Local ONNX for local CLI development)
