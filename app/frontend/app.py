@@ -24,6 +24,10 @@ st.set_page_config(
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://researchgpt-backend-ygh8.onrender.com/api/v1/research")
 BACKEND_HEALTH_URL = API_BASE_URL.replace("/api/v1/research", "/health")
 
+def clean_html(raw_html: str) -> str:
+    """Strips leading/trailing whitespace on every line to prevent Markdown code block triggers."""
+    return "\n".join(line.strip() for line in raw_html.splitlines() if line.strip())
+
 # ==========================================
 # ULTRA-PREMIUM TIER-1 DESIGN SYSTEM (CSS)
 # ==========================================
@@ -167,7 +171,7 @@ st.markdown("""
         font-weight: 700;
         letter-spacing: -0.02em;
         color: var(--text-primary);
-        margin: 1.5rem 0 1rem 0;
+        margin: 1.5rem 0 0.5rem 0;
         display: flex;
         align-items: center;
         gap: 8px;
@@ -213,7 +217,7 @@ st.markdown("""
         font-size: 0.82rem;
         color: var(--text-secondary);
         line-height: 1.5;
-        margin-bottom: 1rem;
+        margin-bottom: 0.8rem;
     }
 
     /* Stage Execution Stepper */
@@ -221,7 +225,7 @@ st.markdown("""
         display: grid;
         grid-template-columns: repeat(5, 1fr);
         gap: 12px;
-        margin: 1.5rem 0;
+        margin: 1.2rem 0;
     }
 
     @media (max-width: 900px) {
@@ -236,29 +240,28 @@ st.markdown("""
         border-radius: 12px;
         padding: 1rem 0.85rem;
         text-align: center;
-        position: relative;
         transition: all 0.3s ease;
     }
 
     .step-node.completed {
         border-color: rgba(16, 185, 129, 0.4);
-        background: rgba(16, 185, 129, 0.05);
+        background: rgba(16, 185, 129, 0.06);
     }
 
     .step-node.active {
         border-color: #3B82F6;
-        background: rgba(59, 130, 246, 0.12);
-        box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+        background: rgba(59, 130, 246, 0.15);
+        box-shadow: 0 0 20px rgba(59, 130, 246, 0.35);
         transform: scale(1.02);
     }
 
     .step-icon {
-        font-size: 1.25rem;
+        font-size: 1.3rem;
         margin-bottom: 0.35rem;
     }
 
     .step-label {
-        font-size: 0.82rem;
+        font-size: 0.84rem;
         font-weight: 700;
         color: #FFFFFF;
         margin-bottom: 0.2rem;
@@ -418,23 +421,24 @@ st.markdown("""
 # ==========================================
 # ROBUST EXECUTIVE PDF GENERATOR
 # ==========================================
-class ExecutiveReportPDF(FPDF):
-    def header(self):
-        self.set_font("Helvetica", "B", 8)
-        self.set_text_color(120, 130, 145)
-        self.cell(0, 8, "RESEARCHGPT INTEL ENGINE | AUTONOMOUS EXECUTIVE SYNTHESIS", border=0, align="L")
-        self.cell(0, 8, datetime.now().strftime("%B %d, %Y"), border=0, align="R")
-        self.ln(10)
-        self.set_draw_color(220, 225, 235)
-        self.set_line_width(0.3)
-        self.line(10, 18, 200, 18)
-        self.ln(4)
+if FPDF:
+    class ExecutiveReportPDF(FPDF):
+        def header(self):
+            self.set_font("Helvetica", "B", 8)
+            self.set_text_color(120, 130, 145)
+            self.cell(0, 8, "RESEARCHGPT INTEL ENGINE | AUTONOMOUS EXECUTIVE SYNTHESIS", border=0, align="L")
+            self.cell(0, 8, datetime.now().strftime("%B %d, %Y"), border=0, align="R")
+            self.ln(10)
+            self.set_draw_color(220, 225, 235)
+            self.set_line_width(0.3)
+            self.line(10, 18, 200, 18)
+            self.ln(4)
 
-    def footer(self):
-        self.set_y(-15)
-        self.set_font("Helvetica", size=8)
-        self.set_text_color(150, 160, 175)
-        self.cell(0, 10, f"Page {self.page_no()}/{{nb}}  |  Generated autonomously via LangGraph & Gemini 3.8", align="C")
+        def footer(self):
+            self.set_y(-15)
+            self.set_font("Helvetica", size=8)
+            self.set_text_color(150, 160, 175)
+            self.cell(0, 10, f"Page {self.page_no()}/{{nb}}  |  Generated autonomously via LangGraph & Gemini 3.8", align="C")
 
 def generate_pdf(md_text: str, query_title: str = "Executive Research Synthesis") -> bytes:
     """Generates an executive, highly polished PDF with sanitized unicode and styling."""
@@ -459,20 +463,16 @@ def generate_pdf(md_text: str, query_title: str = "Executive Research Synthesis"
     for orig, repl in replacements.items():
         clean_text = clean_text.replace(orig, repl)
 
-    # Encode safely to latin-1
     safe_clean_text = clean_text.encode('latin-1', 'replace').decode('latin-1')
         
     try:
-        # Convert Markdown to structured HTML for fpdf2
         html = markdown.markdown(safe_clean_text, extensions=['tables', 'fenced_code'])
-        # Add basic inline styling to HTML headers
         html = re.sub(r'<h1>(.*?)</h1>', r'<h1 style="color:#0f172a; font-size:18pt;">\1</h1>', html)
         html = re.sub(r'<h2>(.*?)</h2>', r'<h2 style="color:#1e3a8a; font-size:14pt;">\1</h2>', html)
         html = re.sub(r'<h3>(.*?)</h3>', r'<h3 style="color:#2563eb; font-size:12pt;">\1</h3>', html)
         pdf.set_font("Helvetica", size=10)
         pdf.write_html(html)
-    except Exception as e:
-        # Fallback to plain text rendering
+    except Exception:
         pdf = ExecutiveReportPDF()
         pdf.alias_nb_pages()
         pdf.add_page()
@@ -495,26 +495,112 @@ if "final_report" not in st.session_state:
     st.session_state.final_report = None
 if "current_stage" not in st.session_state:
     st.session_state.current_stage = "initialized"
-if "query_input" not in st.session_state:
-    st.session_state.query_input = ""
+if "main_query_textarea" not in st.session_state:
+    st.session_state.main_query_textarea = ""
 if "active_query_text" not in st.session_state:
     st.session_state.active_query_text = ""
-if "research_mode" not in st.session_state:
-    st.session_state.research_mode = "Deep Academic Synthesis"
 
-# Helper to set directive from quick starter cards
-def set_preset_directive(prompt_text: str, auto_launch: bool = False):
-    st.session_state.query_input = prompt_text
-    st.session_state.active_query_text = prompt_text
-    if auto_launch:
-        st.session_state.trigger_run = True
+# ==========================================
+# CENTRALIZED RESEARCH EXECUTION ENGINE
+# ==========================================
+def launch_research(directive_text: str):
+    """Centralized launcher: validates directive, dispatches to backend, and handles state transitions."""
+    clean_text = directive_text.strip()
+    if not clean_text:
+        st.error("⚠️ Please provide a research directive.")
+        return
+        
+    st.session_state.main_query_textarea = clean_text
+    st.session_state.active_query_text = clean_text
+    st.session_state.run_id = None
+    st.session_state.status = "pending"
+    st.session_state.final_report = None
+    st.session_state.current_stage = "initialized"
+    
+    with st.spinner("Dispatching DAG to ResearchGPT Orchestrator..."):
+        try:
+            response = requests.post(API_BASE_URL, json={"query": clean_text}, timeout=25)
+            if response.status_code == 202:
+                data = response.json()
+                st.session_state.run_id = data["run_id"]
+                st.session_state.status = data.get("status", "pending")
+                st.session_state.current_stage = "initialized"
+                st.rerun()
+            else:
+                st.error(f"Engine Dispatch Error ({response.status_code}): {response.text}")
+                st.session_state.status = None
+        except Exception as e:
+            st.error(f"Backend Handshake Failed: {str(e)}")
+            st.session_state.status = None
+
+def load_directive_to_input(directive_text: str):
+    """Loads a directive into the sidebar textarea for user customization."""
+    st.session_state.main_query_textarea = directive_text
+    st.rerun()
+
+# ==========================================
+# STEPPER & TELEMETRY HTML BUILDERS (NO INDENTATION)
+# ==========================================
+def build_stepper_html(current_idx: int, stages_map: dict) -> str:
+    agent_stages = [
+        ("planner", stages_map["planner"]),
+        ("search", stages_map["search"]),
+        ("retriever", stages_map["retriever"]),
+        ("critic", stages_map["critic"]),
+        ("writer", stages_map["writer"])
+    ]
+    nodes = []
+    for key, val in agent_stages:
+        if current_idx > val["index"]:
+            node_class = "step-node completed"
+            icon_display = "✅"
+        elif current_idx == val["index"]:
+            node_class = "step-node active"
+            icon_display = val["icon"]
+        else:
+            node_class = "step-node"
+            icon_display = val["icon"]
+
+        node_html = (
+            f'<div class="{node_class}">'
+            f'<div class="step-icon">{icon_display}</div>'
+            f'<div class="step-label">{val["label"]}</div>'
+            f'<div class="step-desc">{val["desc"]}</div>'
+            f'</div>'
+        )
+        nodes.append(node_html)
+
+    return f'<div class="stepper-container">{"".join(nodes)}</div>'
+
+def build_telemetry_html(current_stage: str, stage_desc: str, elapsed_seconds: int, current_status: str) -> str:
+    return (
+        '<div class="telemetry-card">'
+        '<div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">'
+        '<div>'
+        '<span style="font-size: 0.72rem; text-transform: uppercase; color: #94A3B8; font-weight: 700; letter-spacing: 0.05em;">Active Orchestration Node</span>'
+        '<div style="font-size: 1.1rem; font-weight: 800; color: #60A5FA; margin-top: 2px;">'
+        f'<code>{current_stage.upper()} NODE</code> &nbsp;&bull;&nbsp; <span style="font-size: 0.88rem; color: #E2E8F0; font-weight: 500;">{stage_desc}</span>'
+        '</div>'
+        '</div>'
+        '<div style="display: flex; gap: 14px;">'
+        '<div style="background: rgba(255,255,255,0.05); padding: 6px 12px; border-radius: 8px; text-align: center;">'
+        '<div style="font-size: 0.68rem; color: #64748B; text-transform: uppercase;">Elapsed</div>'
+        f'<div style="font-size: 0.95rem; font-weight: 700; color: #F8FAFC;">{elapsed_seconds}s</div>'
+        '</div>'
+        '<div style="background: rgba(255,255,255,0.05); padding: 6px 12px; border-radius: 8px; text-align: center;">'
+        '<div style="font-size: 0.68rem; color: #64748B; text-transform: uppercase;">Engine State</div>'
+        f'<div style="font-size: 0.95rem; font-weight: 700; color: #34D399;">{current_status.upper()}</div>'
+        '</div>'
+        '</div>'
+        '</div>'
+        '</div>'
+    )
 
 # ==========================================
 # SIDEBAR: ENTERPRISE COMMAND COCKPIT
 # ==========================================
 with st.sidebar:
-    # Branding Header
-    st.markdown("""
+    st.markdown(clean_html("""
         <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 0.5rem;">
             <div style="background: linear-gradient(135deg, #2563EB, #7C3AED); width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; box-shadow: 0 4px 12px rgba(37,99,235,0.4);">🔬</div>
             <div>
@@ -525,27 +611,20 @@ with st.sidebar:
         <div style="margin-bottom: 1rem;">
             <span class="status-pill"><span class="status-dot"></span> LangGraph DAG Online</span>
         </div>
-    """, unsafe_allow_html=True)
+    """), unsafe_allow_html=True)
     
     st.markdown("<hr style='border: none; border-top: 1px solid rgba(255,255,255,0.08); margin: 0.8rem 0 1.2rem 0;'>", unsafe_allow_html=True)
     
     st.markdown("**🎯 Research Directive**")
     
-    query = st.text_area(
+    st.text_area(
         label="Directive Input",
-        value=st.session_state.query_input,
         placeholder="Enter research topic, hypothesis, or analytical question...\ne.g., Commercial viability and benchmarks of Solid-State vs Silicon Anode batteries by 2030",
         height=130,
         label_visibility="collapsed",
         key="main_query_textarea"
     )
-    
-    # Sync query state if typed manually
-    if query != st.session_state.query_input:
-        st.session_state.query_input = query
-        st.session_state.active_query_text = query
 
-    # Advanced Execution Parameters
     with st.expander("⚙️ Synthesis Parameters", expanded=False):
         st.selectbox(
             "Synthesis Depth",
@@ -566,7 +645,6 @@ with st.sidebar:
     
     is_processing = st.session_state.status in ["pending", "running"]
     
-    # Launch CTA
     col_run, col_reset = st.columns([3, 1])
     with col_run:
         launch_clicked = st.button(
@@ -583,51 +661,22 @@ with st.sidebar:
         st.session_state.status = None
         st.session_state.final_report = None
         st.session_state.current_stage = "initialized"
-        st.session_state.query_input = ""
+        st.session_state.main_query_textarea = ""
         st.session_state.active_query_text = ""
         st.rerun()
 
-    # Trigger research launch
-    should_launch = launch_clicked or st.session_state.get("trigger_run", False)
-    if "trigger_run" in st.session_state:
-        del st.session_state.trigger_run
+    if launch_clicked:
+        launch_research(st.session_state.main_query_textarea)
 
-    if should_launch:
-        current_directive = st.session_state.query_input.strip()
-        if not current_directive:
-            st.error("⚠️ Please specify a research directive.")
-        else:
-            st.session_state.run_id = None
-            st.session_state.status = "pending"
-            st.session_state.final_report = None
-            st.session_state.active_query_text = current_directive
-            
-            with st.spinner("Dispatching DAG to ResearchGPT Orchestrator..."):
-                try:
-                    response = requests.post(API_BASE_URL, json={"query": current_directive}, timeout=25)
-                    if response.status_code == 202:
-                        data = response.json()
-                        st.session_state.run_id = data["run_id"]
-                        st.session_state.status = data.get("status", "pending")
-                        st.session_state.current_stage = "initialized"
-                        st.rerun()
-                    else:
-                        st.error(f"Engine Dispatch Error ({response.status_code}): {response.text}")
-                        st.session_state.status = None
-                except Exception as e:
-                    st.error(f"Backend Handshake Failed: {str(e)}")
-                    st.session_state.status = None
-
-    # Architecture Footnote
     st.markdown("<hr style='border: none; border-top: 1px solid rgba(255,255,255,0.08); margin: 1.5rem 0 1rem 0;'>", unsafe_allow_html=True)
-    st.markdown("""
+    st.markdown(clean_html("""
         <div style="font-size: 0.72rem; color: #64748B; line-height: 1.5;">
             <b>Architecture:</b> Cyclic LangGraph DAG<br>
             <b>Validation:</b> RAGAS Context Critique<br>
             <b>Vectors:</b> Qdrant Cosine Reranking<br>
             <b>Persistence:</b> PostgreSQL Engine
         </div>
-    """, unsafe_allow_html=True)
+    """), unsafe_allow_html=True)
 
 # ==========================================
 # MAIN WORKSPACE CANVAS
@@ -638,7 +687,7 @@ with st.sidebar:
 # ----------------------------------------------------
 if not st.session_state.run_id:
     # Hero Showcase
-    st.markdown("""
+    st.markdown(clean_html("""
         <div class="hero-container">
             <div class="hero-badge">Autonomous Multi-Agent Intelligence Engine</div>
             <div class="hero-heading">Deep Academic & Strategic Research <br><span class="hero-gradient-text">Engineered for Rigorous Synthesis.</span></div>
@@ -646,15 +695,15 @@ if not st.session_state.run_id:
                 ResearchGPT bypasses shallow single-shot LLM queries using a cyclic 5-agent LangGraph state machine. It decomposes hypotheses into targeted sub-queries, scrapes high-trust academic literature, vectorizes chunks in Qdrant, dynamically critiques factual relevance, and synthesizes publication-grade reports with inline citations.
             </div>
         </div>
-    """, unsafe_allow_html=True)
+    """), unsafe_allow_html=True)
 
-    # Interactive Quick-Start Directives (Functional, Beautiful Cards)
+    # Interactive Quick-Start Directives (Functional, Instant-Launch Cards)
     st.markdown("<div class='section-title'>⚡ Quick-Start Research Directives</div>", unsafe_allow_html=True)
-    st.caption("Click any high-impact analytical directive below to immediately stage and initiate autonomous research.")
+    st.caption("Click 'Launch Directive' to immediately initiate autonomous synthesis, or 'Load to Input' to customize it in the sidebar.")
 
     p1, p2 = st.columns(2)
     with p1:
-        st.markdown("""
+        st.markdown(clean_html("""
             <div class="card-box">
                 <div>
                     <div class="card-tag">🧬 BIOMEDICAL & QUANTUM AI</div>
@@ -662,14 +711,18 @@ if not st.session_state.run_id:
                     <div class="card-text">Evaluate the impact of fault-tolerant quantum algorithms on molecular docking, protein folding, and clinical lead discovery in oncology through 2030.</div>
                 </div>
             </div>
-        """, unsafe_allow_html=True)
-        if st.button("🚀 Load & Launch Directive", key="btn_preset_1", use_container_width=True):
-            set_preset_directive("Evaluate the impact of fault-tolerant quantum algorithms on molecular docking, protein folding, and clinical lead discovery in oncology through 2030.", auto_launch=True)
-            st.rerun()
+        """), unsafe_allow_html=True)
+        col_b1, col_b2 = st.columns(2)
+        with col_b1:
+            if st.button("🚀 Launch Directive", key="launch_preset_1", type="primary", use_container_width=True):
+                launch_research("Evaluate the impact of fault-tolerant quantum algorithms on molecular docking, protein folding, and clinical lead discovery in oncology through 2030.")
+        with col_b2:
+            if st.button("✏️ Load to Input", key="load_preset_1", use_container_width=True):
+                load_directive_to_input("Evaluate the impact of fault-tolerant quantum algorithms on molecular docking, protein folding, and clinical lead discovery in oncology through 2030.")
 
-        st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
 
-        st.markdown("""
+        st.markdown(clean_html("""
             <div class="card-box">
                 <div>
                     <div class="card-tag">⚡ CLEAN ENERGY & MATERIALS</div>
@@ -677,13 +730,17 @@ if not st.session_state.run_id:
                     <div class="card-text">Compare commercial viability, volumetric energy density (Wh/L), thermal runaway risk, and manufacturing scalability between all-solid-state and silicon-dominant lithium cells.</div>
                 </div>
             </div>
-        """, unsafe_allow_html=True)
-        if st.button("🚀 Load & Launch Directive", key="btn_preset_2", use_container_width=True):
-            set_preset_directive("Compare commercial viability, volumetric energy density (Wh/L), thermal runaway risk, and manufacturing scalability between all-solid-state and silicon-dominant lithium cells.", auto_launch=True)
-            st.rerun()
+        """), unsafe_allow_html=True)
+        col_b3, col_b4 = st.columns(2)
+        with col_b3:
+            if st.button("🚀 Launch Directive", key="launch_preset_2", type="primary", use_container_width=True):
+                launch_research("Compare commercial viability, volumetric energy density (Wh/L), thermal runaway risk, and manufacturing scalability between all-solid-state and silicon-dominant lithium cells.")
+        with col_b4:
+            if st.button("✏️ Load to Input", key="load_preset_2", use_container_width=True):
+                load_directive_to_input("Compare commercial viability, volumetric energy density (Wh/L), thermal runaway risk, and manufacturing scalability between all-solid-state and silicon-dominant lithium cells.")
 
     with p2:
-        st.markdown("""
+        st.markdown(clean_html("""
             <div class="card-box">
                 <div>
                     <div class="card-tag">🌐 MACROECONOMICS & AI</div>
@@ -691,14 +748,18 @@ if not st.session_state.run_id:
                     <div class="card-text">Analyze projected macroeconomic disruption, enterprise white-collar labor displacement, and productivity multipliers from multi-agent autonomous AI systems by 2030.</div>
                 </div>
             </div>
-        """, unsafe_allow_html=True)
-        if st.button("🚀 Load & Launch Directive", key="btn_preset_3", use_container_width=True):
-            set_preset_directive("Analyze projected macroeconomic disruption, enterprise white-collar labor displacement, and productivity multipliers from multi-agent autonomous AI systems by 2030.", auto_launch=True)
-            st.rerun()
+        """), unsafe_allow_html=True)
+        col_b5, col_b6 = st.columns(2)
+        with col_b5:
+            if st.button("🚀 Launch Directive", key="launch_preset_3", type="primary", use_container_width=True):
+                launch_research("Analyze projected macroeconomic disruption, enterprise white-collar labor displacement, and productivity multipliers from multi-agent autonomous AI systems by 2030.")
+        with col_b6:
+            if st.button("✏️ Load to Input", key="load_preset_3", use_container_width=True):
+                load_directive_to_input("Analyze projected macroeconomic disruption, enterprise white-collar labor displacement, and productivity multipliers from multi-agent autonomous AI systems by 2030.")
 
-        st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
 
-        st.markdown("""
+        st.markdown(clean_html("""
             <div class="card-box">
                 <div>
                     <div class="card-tag">🚀 ADVANCED AEROSPACE</div>
@@ -706,67 +767,73 @@ if not st.session_state.run_id:
                     <div class="card-text">Assess ultra-high-temperature ceramic matrix composites (UHTCMCs) for thermal protection and structural leading edges in Mach 5+ hypersonic scramjet propulsion.</div>
                 </div>
             </div>
-        """, unsafe_allow_html=True)
-        if st.button("🚀 Load & Launch Directive", key="btn_preset_4", use_container_width=True):
-            set_preset_directive("Assess ultra-high-temperature ceramic matrix composites (UHTCMCs) for thermal protection and structural leading edges in Mach 5+ hypersonic scramjet propulsion.", auto_launch=True)
-            st.rerun()
+        """), unsafe_allow_html=True)
+        col_b7, col_b8 = st.columns(2)
+        with col_b7:
+            if st.button("🚀 Launch Directive", key="launch_preset_4", type="primary", use_container_width=True):
+                launch_research("Assess ultra-high-temperature ceramic matrix composites (UHTCMCs) for thermal protection and structural leading edges in Mach 5+ hypersonic scramjet propulsion.")
+        with col_b8:
+            if st.button("✏️ Load to Input", key="load_preset_4", use_container_width=True):
+                load_directive_to_input("Assess ultra-high-temperature ceramic matrix composites (UHTCMCs) for thermal protection and structural leading edges in Mach 5+ hypersonic scramjet propulsion.")
 
     # Core Capabilities Grid
     st.markdown("<div class='section-title'>🛡️ Production Architecture & Quality Guardrails</div>", unsafe_allow_html=True)
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.markdown("""
+        st.markdown(clean_html("""
             <div class="card-box">
                 <div style="font-size: 24px; margin-bottom: 8px;">🧭</div>
                 <div class="card-title">LangGraph Cyclic DAG</div>
                 <div class="card-text">Iterative state machine orchestrating 5 specialized agent nodes with conditional retry loops.</div>
             </div>
-        """, unsafe_allow_html=True)
+        """), unsafe_allow_html=True)
     with c2:
-        st.markdown("""
+        st.markdown(clean_html("""
             <div class="card-box">
                 <div style="font-size: 24px; margin-bottom: 8px;">🌐</div>
                 <div class="card-title">Trust-Tier Web Filtering</div>
                 <div class="card-text">Blocks spam and homework platforms; extracts exclusively from peer-reviewed, academic, and verified sources.</div>
             </div>
-        """, unsafe_allow_html=True)
+        """), unsafe_allow_html=True)
     with c3:
-        st.markdown("""
+        st.markdown(clean_html("""
             <div class="card-box">
                 <div style="font-size: 24px; margin-bottom: 8px;">🧬</div>
                 <div class="card-title">Qdrant Vector Memory</div>
                 <div class="card-text">High-dimensional embeddings with cosine similarity reranking for isolated, run-specific semantic memory.</div>
             </div>
-        """, unsafe_allow_html=True)
+        """), unsafe_allow_html=True)
     with c4:
-        st.markdown("""
+        st.markdown(clean_html("""
             <div class="card-box">
                 <div style="font-size: 24px; margin-bottom: 8px;">⚖️</div>
                 <div class="card-title">RAGAS Critic Verification</div>
                 <div class="card-text">Automated quality gatekeeper scoring retrieved evidence and triggering query rewrites if relevancy is below threshold.</div>
             </div>
-        """, unsafe_allow_html=True)
+        """), unsafe_allow_html=True)
 
 # ----------------------------------------------------
 # 2. RUNNING / POLLING STATE: LIVE MULTI-AGENT TELEMETRY
 # ----------------------------------------------------
 else:
     if st.session_state.status not in ["completed", "failed"]:
-        st.markdown(f"""
+        active_title = st.session_state.active_query_text or "Active Research Directive"
+        run_preview = st.session_state.run_id[:8] if st.session_state.run_id else "..."
+        
+        st.markdown(clean_html(f"""
             <div style="padding: 1.2rem 1.5rem; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 14px; margin-bottom: 1.5rem;">
                 <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
                     <div>
                         <span class="status-pill" style="margin-bottom: 6px;"><span class="status-dot"></span> Autonomous Synthesis in Progress</span>
-                        <div style="font-size: 1.3rem; font-weight: 700; color: #FFFFFF; margin-top: 4px;">{st.session_state.active_query_text or "Active Research Directive"}</div>
+                        <div style="font-size: 1.3rem; font-weight: 700; color: #FFFFFF; margin-top: 4px;">{active_title}</div>
                     </div>
                     <div style="text-align: right;">
-                        <code style="background: #111827; padding: 4px 8px; border-radius: 6px; font-size: 0.78rem; color: #94A3B8;">Run ID: {st.session_state.run_id[:8]}...</code>
+                        <code style="background: #111827; padding: 4px 8px; border-radius: 6px; font-size: 0.78rem; color: #94A3B8;">Run ID: {run_preview}...</code>
                     </div>
                 </div>
             </div>
-        """, unsafe_allow_html=True)
+        """), unsafe_allow_html=True)
 
-        # Dynamic Visual Stepper Definition
         stages_map = {
             "initialized": {"index": 0, "label": "Pipeline Init", "icon": "⚡", "desc": "Allocating LangGraph state & session memory", "pct": 10},
             "planner": {"index": 1, "label": "Planner Agent", "icon": "🧭", "desc": "Decomposing query into 5 sub-hypotheses", "pct": 30},
@@ -798,59 +865,9 @@ else:
                     stage_info = stages_map.get(current_stage, stages_map["initialized"])
                     current_idx = stage_info["index"]
 
-                    # Update Progress Bar
                     progress_placeholder.progress(stage_info["pct"], text=f"Stage: {stage_info['label']} ({stage_info['pct']}%)")
-
-                    # Render Interactive Multi-Agent Stepper
-                    stepper_html = "<div class='stepper-container'>"
-                    for key, val in [("planner", stages_map["planner"]),
-                                     ("search", stages_map["search"]),
-                                     ("retriever", stages_map["retriever"]),
-                                     ("critic", stages_map["critic"]),
-                                     ("writer", stages_map["writer"])]:
-                        if current_idx > val["index"]:
-                            node_class = "step-node completed"
-                            icon_display = "✅"
-                        elif current_idx == val["index"]:
-                            node_class = "step-node active"
-                            icon_display = val["icon"]
-                        else:
-                            node_class = "step-node"
-                            icon_display = val["icon"]
-
-                        stepper_html += f"""
-                            <div class="{node_class}">
-                                <div class="step-icon">{icon_display}</div>
-                                <div class="step-label">{val['label']}</div>
-                                <div class="step-desc">{val['desc']}</div>
-                            </div>
-                        """
-                    stepper_html += "</div>"
-                    stepper_placeholder.markdown(stepper_html, unsafe_allow_html=True)
-
-                    # Render Live Telemetry Box
-                    telemetry_placeholder.markdown(f"""
-                        <div class="telemetry-card">
-                            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-                                <div>
-                                    <span style="font-size: 0.72rem; text-transform: uppercase; color: #94A3B8; font-weight: 700; letter-spacing: 0.05em;">Active Orchestration Node</span>
-                                    <div style="font-size: 1.1rem; font-weight: 800; color: #60A5FA; margin-top: 2px;">
-                                        <code>{current_stage.upper()} NODE</code> &nbsp;•&nbsp; <span style="font-size: 0.88rem; color: #E2E8F0; font-weight: 500;">{stage_info['desc']}</span>
-                                    </div>
-                                </div>
-                                <div style="display: flex; gap: 14px;">
-                                    <div style="background: rgba(255,255,255,0.05); padding: 6px 12px; border-radius: 8px; text-align: center;">
-                                        <div style="font-size: 0.68rem; color: #64748B; text-transform: uppercase;">Elapsed</div>
-                                        <div style="font-size: 0.95rem; font-weight: 700; color: #F8FAFC;">{elapsed_seconds}s</div>
-                                    </div>
-                                    <div style="background: rgba(255,255,255,0.05); padding: 6px 12px; border-radius: 8px; text-align: center;">
-                                        <div style="font-size: 0.68rem; color: #64748B; text-transform: uppercase;">Engine State</div>
-                                        <div style="font-size: 0.95rem; font-weight: 700; color: #34D399;">{current_status.upper()}</div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    """, unsafe_allow_html=True)
+                    stepper_placeholder.markdown(build_stepper_html(current_idx, stages_map), unsafe_allow_html=True)
+                    telemetry_placeholder.markdown(build_telemetry_html(current_stage, stage_info['desc'], elapsed_seconds, current_status), unsafe_allow_html=True)
 
                     if current_status in ["completed", "failed"]:
                         st.session_state.status = current_status
@@ -878,9 +895,10 @@ else:
         report_text = st.session_state.final_report
         word_count = len(report_text.split())
         reading_time = max(1, round(word_count / 220))
+        active_title = st.session_state.active_query_text or "Autonomous Research Report"
+        run_preview = st.session_state.run_id[:8] if st.session_state.run_id else "..."
 
-        # Top Executive Header
-        st.markdown(f"""
+        st.markdown(clean_html(f"""
             <div style="padding: 1.5rem 1.8rem; background: linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(17, 24, 39, 0.8) 100%); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 16px; margin-bottom: 1.5rem;">
                 <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
                     <div>
@@ -888,15 +906,14 @@ else:
                             <span class="status-dot"></span> Synthesis Complete & Grounded
                         </span>
                         <div style="font-size: 1.6rem; font-weight: 800; color: #FFFFFF; margin-top: 6px;">
-                            {st.session_state.active_query_text or "Autonomous Research Report"}
+                            {active_title}
                         </div>
                     </div>
                 </div>
             </div>
-        """, unsafe_allow_html=True)
+        """), unsafe_allow_html=True)
 
-        # Metrics Bar
-        st.markdown(f"""
+        st.markdown(clean_html(f"""
             <div class="metrics-bar">
                 <div class="metric-badge">
                     <span style="font-size: 16px;">⏱️</span>
@@ -930,31 +947,30 @@ else:
                     <span style="font-size: 16px;">🆔</span>
                     <div>
                         <div class="metric-badge-label">Run Trace ID</div>
-                        <div class="metric-badge-value" style="font-family: monospace;">{st.session_state.run_id[:8]}</div>
+                        <div class="metric-badge-value" style="font-family: monospace;">{run_preview}</div>
                     </div>
                 </div>
             </div>
-        """, unsafe_allow_html=True)
+        """), unsafe_allow_html=True)
 
-        # Action Toolbar (Export / New Directive)
         action_col1, action_col2, action_col3 = st.columns([1.5, 1.5, 1.2])
         
         with action_col1:
             st.download_button(
                 label="💾 Download Markdown (.md)",
                 data=report_text,
-                file_name=f"ResearchGPT_Report_{st.session_state.run_id[:8]}.md",
+                file_name=f"ResearchGPT_Report_{run_preview}.md",
                 mime="text/markdown",
                 use_container_width=True
             )
             
         with action_col2:
             try:
-                pdf_bytes = generate_pdf(report_text, query_title=st.session_state.active_query_text or "Synthesis Report")
+                pdf_bytes = generate_pdf(report_text, query_title=active_title)
                 st.download_button(
                     label="📄 Download Executive PDF (.pdf)",
                     data=pdf_bytes,
-                    file_name=f"ResearchGPT_Report_{st.session_state.run_id[:8]}.pdf",
+                    file_name=f"ResearchGPT_Report_{run_preview}.pdf",
                     mime="application/pdf",
                     use_container_width=True
                 )
@@ -967,13 +983,12 @@ else:
                 st.session_state.status = None
                 st.session_state.final_report = None
                 st.session_state.current_stage = "initialized"
-                st.session_state.query_input = ""
+                st.session_state.main_query_textarea = ""
                 st.session_state.active_query_text = ""
                 st.rerun()
 
         st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
 
-        # Tabbed Workspace
         tab_report, tab_architecture, tab_telemetry = st.tabs([
             "📑 Executive Synthesis Deliverable",
             "🧠 Agent DAG Architecture & Traces",
@@ -981,9 +996,7 @@ else:
         ])
 
         with tab_report:
-            st.markdown(f"""
-                <div class="report-viewport">
-            """, unsafe_allow_html=True)
+            st.markdown('<div class="report-viewport">', unsafe_allow_html=True)
             st.markdown(report_text)
             st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1032,7 +1045,7 @@ TIMESTAMP: {datetime.utcnow().isoformat()}Z
     # 4. FAILED STATE: COMPREHENSIVE DIAGNOSTICS & RETRY
     # ----------------------------------------------------
     elif st.session_state.status == "failed":
-        st.markdown(f"""
+        st.markdown(clean_html(f"""
             <div style="padding: 1.5rem; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 14px; margin-bottom: 1.5rem;">
                 <div style="font-size: 1.3rem; font-weight: 800; color: #EF4444; margin-bottom: 0.5rem;">
                     🚨 Autonomous Synthesis Pipeline Interrupted
@@ -1041,7 +1054,7 @@ TIMESTAMP: {datetime.utcnow().isoformat()}Z
                     {st.session_state.get("error_message", "An unexpected exception occurred during agent graph execution.")}
                 </div>
             </div>
-        """, unsafe_allow_html=True)
+        """), unsafe_allow_html=True)
 
         col_f1, col_f2 = st.columns([1, 3])
         with col_f1:
