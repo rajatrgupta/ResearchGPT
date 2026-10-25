@@ -86,7 +86,10 @@ _FALLBACK_TOPICS = [
 ]
 
 _TRENDING_CACHE_KEY = "_trending_topics_cache"
-_TRENDING_CACHE_TTL_HOURS = 24
+# 72-hour TTL = max ~40 Tavily calls/month even with frequent cold starts.
+# Tavily free tier = 1,000 searches/month. Main usage is actual research runs
+# (~5 searches per run). This keeps trending-topic overhead at <5% of quota.
+_TRENDING_CACHE_TTL_HOURS = 72
 
 
 def _parse_topic_from_tavily(result: dict, domain_tag: str) -> dict | None:
@@ -115,43 +118,55 @@ def _parse_topic_from_tavily(result: dict, domain_tag: str) -> dict | None:
 def fetch_trending_topics() -> list[dict]:
     """
     Fetches 4 trending research topics — one per domain — via Tavily Search API.
-    Results are cached for 24 hours. Falls back to hardcoded evergreen topics on
-    any error (missing key, network failure, quota exhaustion).
+    Results are cached for 72 hours (process-level, shared across all users).
+    Falls back to hardcoded evergreen topics on any error (missing key,
+    network failure, quota exhaustion, or HTTP 429 rate-limit).
+
+    Monthly Tavily quota impact:
+      - 4 calls per cold start, cached 72 hrs → ~40 calls/month worst-case.
+      - Free tier = 1,000 searches/month; main usage is research runs (~5/run).
+      - This feature consumes <5% of the free quota.
     """
     tavily_key = os.environ.get("TAVILY_API_KEY", "")
     if not tavily_key or tavily_key.startswith("your_"):
+        # No key configured — silently show evergreen fallback, no API call
         return _FALLBACK_TOPICS
 
     topics: list[dict] = []
     for slot in _DOMAIN_SLOTS:
+        fallback_idx = _DOMAIN_SLOTS.index(slot)
         try:
             resp = requests.post(
                 "https://api.tavily.com/search",
                 json={
                     "api_key": tavily_key,
                     "query": slot["query"],
-                    "search_depth": "basic",
-                    "max_results": 5,
-                    "include_answer": False,
+                    "search_depth": "basic",   # cheapest tier — 1 credit each
+                    "max_results": 3,           # reduced from 5 → fewer tokens processed
+                    "include_answer": False,    # no LLM answer → no extra cost
                 },
-                timeout=10,
+                timeout=8,
             )
             if resp.status_code == 200:
                 results = resp.json().get("results", [])
+                found = False
                 for r in results:
                     parsed = _parse_topic_from_tavily(r, slot["tag"])
                     if parsed:
                         topics.append(parsed)
-                        break  # one topic per domain
-                else:
-                    # No usable result for this slot → use fallback for this slot
-                    fallback_idx = _DOMAIN_SLOTS.index(slot)
+                        found = True
+                        break  # one topic per domain — stop immediately
+                if not found:
                     topics.append(_FALLBACK_TOPICS[fallback_idx])
+            elif resp.status_code == 429:
+                # Rate-limited — use fallback for ALL remaining slots to avoid
+                # burning more quota on a session that's already throttled
+                remaining = _FALLBACK_TOPICS[fallback_idx:]
+                topics.extend(remaining)
+                break
             else:
-                fallback_idx = _DOMAIN_SLOTS.index(slot)
                 topics.append(_FALLBACK_TOPICS[fallback_idx])
         except Exception:
-            fallback_idx = _DOMAIN_SLOTS.index(slot)
             topics.append(_FALLBACK_TOPICS[fallback_idx])
 
     # Safety: if something went very wrong, return full fallback list
