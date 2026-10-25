@@ -4,11 +4,12 @@ import time
 import os
 import re
 import markdown
+import json
 try:
     from fpdf import FPDF
 except ImportError:
     FPDF = None
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # ==========================================
 # PAGE CONFIGURATION & METADATA
@@ -27,6 +28,134 @@ BACKEND_HEALTH_URL = API_BASE_URL.replace("/api/v1/research", "/health")
 def clean_html(raw_html: str) -> str:
     """Strips leading/trailing whitespace on every line to prevent Markdown code block triggers."""
     return "\n".join(line.strip() for line in raw_html.splitlines() if line.strip())
+
+# ==========================================
+# DYNAMIC TRENDING TOPICS ENGINE
+# ==========================================
+# Four research domains — we always pick exactly ONE topic per domain
+# so cards are always diverse regardless of what's trending.
+_DOMAIN_SLOTS = [
+    {
+        "key": "ai_tech",
+        "tag": "🤖 AI & TECHNOLOGY",
+        "query": "most searched AI machine learning research topics 2025 2026",
+    },
+    {
+        "key": "biomedical",
+        "tag": "🧬 BIOMEDICAL & HEALTH",
+        "query": "most searched biomedical health medical research topics 2025 2026",
+    },
+    {
+        "key": "energy_climate",
+        "tag": "⚡ ENERGY & CLIMATE",
+        "query": "most searched clean energy climate research topics 2025 2026",
+    },
+    {
+        "key": "geopolitics_economy",
+        "tag": "🌐 GEOPOLITICS & ECONOMY",
+        "query": "most searched geopolitics economics global policy research topics 2025 2026",
+    },
+]
+
+# Hardcoded evergreen fallbacks — one per domain slot (shown if Tavily fails or no key)
+_FALLBACK_TOPICS = [
+    {
+        "tag": "🤖 AI & TECHNOLOGY",
+        "title": "Reasoning vs. Retrieval: The Next Frontier of LLM Architecture",
+        "text": "Analyze the architectural tradeoffs, benchmark performance, and real-world deployment outcomes of reasoning-native LLMs (o3, Gemini 2.5) versus retrieval-augmented generation pipelines in enterprise AI through 2026.",
+        "directive": "Analyze the architectural tradeoffs, benchmark performance, and real-world deployment outcomes of reasoning-native LLMs (o3, Gemini 2.5) versus retrieval-augmented generation pipelines in enterprise AI through 2026.",
+    },
+    {
+        "tag": "🧬 BIOMEDICAL & HEALTH",
+        "title": "GLP-1 Receptor Agonists: Obesity, Cardiovascular Risk & the Metabolic Revolution",
+        "text": "Synthesize clinical trial evidence, long-term cardiovascular outcomes, and global health economics of GLP-1 agonists (semaglutide, tirzepatide) in obesity and metabolic disease management.",
+        "directive": "Synthesize clinical trial evidence, long-term cardiovascular outcomes, and global health economics of GLP-1 agonists (semaglutide, tirzepatide) in obesity and metabolic disease management.",
+    },
+    {
+        "tag": "⚡ ENERGY & CLIMATE",
+        "title": "Small Modular Reactors: The Nuclear Renaissance in the Energy Transition",
+        "text": "Evaluate the economic viability, regulatory status, safety benchmarks, and grid-scale deployment timelines of Small Modular Reactors (SMRs) as a decarbonization pillar in OECD nations through 2035.",
+        "directive": "Evaluate the economic viability, regulatory status, safety benchmarks, and grid-scale deployment timelines of Small Modular Reactors (SMRs) as a decarbonization pillar in OECD nations through 2035.",
+    },
+    {
+        "tag": "🌐 GEOPOLITICS & ECONOMY",
+        "title": "De-Dollarization: BRICS Currency Initiatives and the Shifting Global Reserve Order",
+        "text": "Assess the structural drivers, geopolitical motivations, macroeconomic feasibility, and projected timeline of BRICS-led de-dollarization efforts and their impact on USD reserve currency dominance.",
+        "directive": "Assess the structural drivers, geopolitical motivations, macroeconomic feasibility, and projected timeline of BRICS-led de-dollarization efforts and their impact on USD reserve currency dominance.",
+    },
+]
+
+_TRENDING_CACHE_KEY = "_trending_topics_cache"
+_TRENDING_CACHE_TTL_HOURS = 24
+
+
+def _parse_topic_from_tavily(result: dict, domain_tag: str) -> dict | None:
+    """Extract a clean research topic card from a single Tavily search result."""
+    title = (result.get("title") or "").strip()
+    content = (result.get("content") or "").strip()
+    if not title or len(title) < 10:
+        return None
+    # Build a concise but rich directive from title + snippet
+    snippet = content[:220].rstrip() if content else title
+    if not snippet.endswith((".","?","!")):
+        snippet = snippet.rsplit(" ", 1)[0]  # trim to last full word
+    directive = f"{title}. {snippet}" if snippet and snippet != title else title
+    # Cap directive length
+    if len(directive) > 400:
+        directive = directive[:397] + "..."
+    return {
+        "tag": domain_tag,
+        "title": title[:90],
+        "text": snippet[:220],
+        "directive": directive,
+    }
+
+
+@st.cache_data(ttl=_TRENDING_CACHE_TTL_HOURS * 3600, show_spinner=False)
+def fetch_trending_topics() -> list[dict]:
+    """
+    Fetches 4 trending research topics — one per domain — via Tavily Search API.
+    Results are cached for 24 hours. Falls back to hardcoded evergreen topics on
+    any error (missing key, network failure, quota exhaustion).
+    """
+    tavily_key = os.environ.get("TAVILY_API_KEY", "")
+    if not tavily_key or tavily_key.startswith("your_"):
+        return _FALLBACK_TOPICS
+
+    topics: list[dict] = []
+    for slot in _DOMAIN_SLOTS:
+        try:
+            resp = requests.post(
+                "https://api.tavily.com/search",
+                json={
+                    "api_key": tavily_key,
+                    "query": slot["query"],
+                    "search_depth": "basic",
+                    "max_results": 5,
+                    "include_answer": False,
+                },
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                results = resp.json().get("results", [])
+                for r in results:
+                    parsed = _parse_topic_from_tavily(r, slot["tag"])
+                    if parsed:
+                        topics.append(parsed)
+                        break  # one topic per domain
+                else:
+                    # No usable result for this slot → use fallback for this slot
+                    fallback_idx = _DOMAIN_SLOTS.index(slot)
+                    topics.append(_FALLBACK_TOPICS[fallback_idx])
+            else:
+                fallback_idx = _DOMAIN_SLOTS.index(slot)
+                topics.append(_FALLBACK_TOPICS[fallback_idx])
+        except Exception:
+            fallback_idx = _DOMAIN_SLOTS.index(slot)
+            topics.append(_FALLBACK_TOPICS[fallback_idx])
+
+    # Safety: if something went very wrong, return full fallback list
+    return topics if len(topics) == 4 else _FALLBACK_TOPICS
 
 # ==========================================
 # ULTRA-PREMIUM TIER-1 DESIGN SYSTEM (CSS)
@@ -499,6 +628,8 @@ if "main_query_textarea" not in st.session_state:
     st.session_state.main_query_textarea = ""
 if "active_query_text" not in st.session_state:
     st.session_state.active_query_text = ""
+if "_pending_directive" not in st.session_state:
+    st.session_state._pending_directive = None
 
 # ==========================================
 # CENTRALIZED RESEARCH EXECUTION ENGINE
@@ -509,14 +640,16 @@ def launch_research(directive_text: str):
     if not clean_text:
         st.error("⚠️ Please provide a research directive.")
         return
-        
-    st.session_state.main_query_textarea = clean_text
+
+    # NOTE: Do NOT set st.session_state.main_query_textarea here — it's bound
+    # to a widget and will raise StreamlitWidgetAlreadyInstantiatedError.
+    # Instead, store the active query separately so the UI can display it.
     st.session_state.active_query_text = clean_text
     st.session_state.run_id = None
     st.session_state.status = "pending"
     st.session_state.final_report = None
     st.session_state.current_stage = "initialized"
-    
+
     with st.spinner("Dispatching DAG to ResearchGPT Orchestrator..."):
         try:
             response = requests.post(API_BASE_URL, json={"query": clean_text}, timeout=25)
@@ -535,7 +668,9 @@ def launch_research(directive_text: str):
 
 def load_directive_to_input(directive_text: str):
     """Loads a directive into the sidebar textarea for user customization."""
-    st.session_state.main_query_textarea = directive_text
+    # Use the pending directive mechanism so the widget key is set before the
+    # widget is instantiated (avoids StreamlitWidgetAlreadyInstantiatedError).
+    st.session_state._pending_directive = directive_text
     st.rerun()
 
 # ==========================================
@@ -616,10 +751,15 @@ with st.sidebar:
     st.markdown("<hr style='border: none; border-top: 1px solid rgba(255,255,255,0.08); margin: 0.8rem 0 1.2rem 0;'>", unsafe_allow_html=True)
     
     st.markdown("**🎯 Research Directive**")
-    
+
+    # Apply any pending directive (from card click) before widget is instantiated
+    if st.session_state._pending_directive is not None:
+        st.session_state.main_query_textarea = st.session_state._pending_directive
+        st.session_state._pending_directive = None
+
     st.text_area(
         label="Directive Input",
-        placeholder="Enter research topic, hypothesis, or analytical question...\ne.g., Commercial viability and benchmarks of Solid-State vs Silicon Anode batteries by 2030",
+        placeholder="Enter your research topic, hypothesis, or analytical question...",
         height=130,
         label_visibility="collapsed",
         key="main_query_textarea"
@@ -697,84 +837,37 @@ if not st.session_state.run_id:
         </div>
     """), unsafe_allow_html=True)
 
-    # Interactive Quick-Start Directives (Functional, Instant-Launch Cards)
-    st.markdown("<div class='section-title'>⚡ Quick-Start Research Directives</div>", unsafe_allow_html=True)
-    st.caption("Click 'Launch Directive' to immediately initiate autonomous synthesis, or 'Load to Input' to customize it in the sidebar.")
+    # Interactive Quick-Start Directives — dynamically fetched & cached 24hrs
+    st.markdown("<div class='section-title'>🔥 Trending Research Directives</div>", unsafe_allow_html=True)
+    st.caption("Refreshed daily via live search · 4 different domains · Click to instantly launch autonomous synthesis.")
 
+    # Fetch topics (cached 24h; falls back to evergreen list on any error)
+    trending_topics = fetch_trending_topics()
+
+    # Render in a 2×2 grid: [0,1] on left column, [2,3] on right column
     p1, p2 = st.columns(2)
-    with p1:
-        st.markdown(clean_html("""
-            <div class="card-box">
-                <div>
-                    <div class="card-tag">🧬 BIOMEDICAL & QUANTUM AI</div>
-                    <div class="card-title">Quantum Computing in Oncology Drug Discovery</div>
-                    <div class="card-text">Evaluate the impact of fault-tolerant quantum algorithms on molecular docking, protein folding, and clinical lead discovery in oncology through 2030.</div>
+    col_map = {0: p1, 1: p1, 2: p2, 3: p2}
+
+    for idx, topic in enumerate(trending_topics[:4]):
+        with col_map[idx]:
+            if idx in (1, 3):
+                st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
+            tag   = topic.get("tag", "📌 RESEARCH")
+            title = topic.get("title", "Trending Research Topic")
+            text  = topic.get("text", "")
+            directive = topic.get("directive", title)
+
+            st.markdown(clean_html(f"""
+                <div class="card-box">
+                    <div>
+                        <div class="card-tag">{tag}</div>
+                        <div class="card-title">{title}</div>
+                        <div class="card-text">{text}</div>
+                    </div>
                 </div>
-            </div>
-        """), unsafe_allow_html=True)
-        col_b1, col_b2 = st.columns(2)
-        with col_b1:
-            if st.button("🚀 Launch Directive", key="launch_preset_1", type="primary", use_container_width=True):
-                launch_research("Evaluate the impact of fault-tolerant quantum algorithms on molecular docking, protein folding, and clinical lead discovery in oncology through 2030.")
-        with col_b2:
-            if st.button("✏️ Load to Input", key="load_preset_1", use_container_width=True):
-                load_directive_to_input("Evaluate the impact of fault-tolerant quantum algorithms on molecular docking, protein folding, and clinical lead discovery in oncology through 2030.")
-
-        st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
-
-        st.markdown(clean_html("""
-            <div class="card-box">
-                <div>
-                    <div class="card-tag">⚡ CLEAN ENERGY & MATERIALS</div>
-                    <div class="card-title">Solid-State vs Silicon Anode Battery Architectures</div>
-                    <div class="card-text">Compare commercial viability, volumetric energy density (Wh/L), thermal runaway risk, and manufacturing scalability between all-solid-state and silicon-dominant lithium cells.</div>
-                </div>
-            </div>
-        """), unsafe_allow_html=True)
-        col_b3, col_b4 = st.columns(2)
-        with col_b3:
-            if st.button("🚀 Launch Directive", key="launch_preset_2", type="primary", use_container_width=True):
-                launch_research("Compare commercial viability, volumetric energy density (Wh/L), thermal runaway risk, and manufacturing scalability between all-solid-state and silicon-dominant lithium cells.")
-        with col_b4:
-            if st.button("✏️ Load to Input", key="load_preset_2", use_container_width=True):
-                load_directive_to_input("Compare commercial viability, volumetric energy density (Wh/L), thermal runaway risk, and manufacturing scalability between all-solid-state and silicon-dominant lithium cells.")
-
-    with p2:
-        st.markdown(clean_html("""
-            <div class="card-box">
-                <div>
-                    <div class="card-tag">🌐 MACROECONOMICS & AI</div>
-                    <div class="card-title">Economic Impact of Autonomous Agent Swarms by 2030</div>
-                    <div class="card-text">Analyze projected macroeconomic disruption, enterprise white-collar labor displacement, and productivity multipliers from multi-agent autonomous AI systems by 2030.</div>
-                </div>
-            </div>
-        """), unsafe_allow_html=True)
-        col_b5, col_b6 = st.columns(2)
-        with col_b5:
-            if st.button("🚀 Launch Directive", key="launch_preset_3", type="primary", use_container_width=True):
-                launch_research("Analyze projected macroeconomic disruption, enterprise white-collar labor displacement, and productivity multipliers from multi-agent autonomous AI systems by 2030.")
-        with col_b6:
-            if st.button("✏️ Load to Input", key="load_preset_3", use_container_width=True):
-                load_directive_to_input("Analyze projected macroeconomic disruption, enterprise white-collar labor displacement, and productivity multipliers from multi-agent autonomous AI systems by 2030.")
-
-        st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
-
-        st.markdown(clean_html("""
-            <div class="card-box">
-                <div>
-                    <div class="card-tag">🚀 ADVANCED AEROSPACE</div>
-                    <div class="card-title">Ceramic Matrix Composites in Hypersonic Scramjets</div>
-                    <div class="card-text">Assess ultra-high-temperature ceramic matrix composites (UHTCMCs) for thermal protection and structural leading edges in Mach 5+ hypersonic scramjet propulsion.</div>
-                </div>
-            </div>
-        """), unsafe_allow_html=True)
-        col_b7, col_b8 = st.columns(2)
-        with col_b7:
-            if st.button("🚀 Launch Directive", key="launch_preset_4", type="primary", use_container_width=True):
-                launch_research("Assess ultra-high-temperature ceramic matrix composites (UHTCMCs) for thermal protection and structural leading edges in Mach 5+ hypersonic scramjet propulsion.")
-        with col_b8:
-            if st.button("✏️ Load to Input", key="load_preset_4", use_container_width=True):
-                load_directive_to_input("Assess ultra-high-temperature ceramic matrix composites (UHTCMCs) for thermal protection and structural leading edges in Mach 5+ hypersonic scramjet propulsion.")
+            """), unsafe_allow_html=True)
+            if st.button("🚀 Launch Research", key=f"launch_preset_{idx+1}", type="primary", use_container_width=True):
+                launch_research(directive)
 
     # Core Capabilities Grid
     st.markdown("<div class='section-title'>🛡️ Production Architecture & Quality Guardrails</div>", unsafe_allow_html=True)
