@@ -327,10 +327,12 @@ st.markdown("""
         border-radius: 14px;
         padding: 1.25rem;
         height: 100%;
+        min-height: 210px;
         transition: all 0.25s ease;
         display: flex;
         flex-direction: column;
-        justify-content: space-between;
+        justify-content: flex-start;
+        box-sizing: border-box;
     }
 
     .card-box:hover {
@@ -353,15 +355,37 @@ st.markdown("""
         font-size: 0.98rem;
         font-weight: 700;
         color: #FFFFFF;
-        margin-bottom: 0.4rem;
+        margin-bottom: 0.5rem;
         line-height: 1.35;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
     }
 
     .card-text {
         font-size: 0.82rem;
         color: var(--text-secondary);
         line-height: 1.5;
-        margin-bottom: 0.8rem;
+        margin-bottom: 0;
+        display: -webkit-box;
+        -webkit-line-clamp: 4;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    /* Trending card wrapper — forces both columns to match heights */
+    .trending-card-wrapper {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+        height: 100%;
+    }
+
+    /* Stretch Streamlit column children to fill height equally */
+    [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlockBorderWrapper"],
+    [data-testid="stVerticalBlock"] > div[data-testid="element-container"] {
+        flex: 1;
     }
 
     /* Stage Execution Stepper */
@@ -852,38 +876,45 @@ if not st.session_state.run_id:
         </div>
     """), unsafe_allow_html=True)
 
-    # Interactive Quick-Start Directives — dynamically fetched & cached 24hrs
+    # Interactive Quick-Start Directives — dynamically fetched & cached 72hrs
     st.markdown("<div class='section-title'>🔥 Trending Research Directives</div>", unsafe_allow_html=True)
-    st.caption("Refreshed daily via live search · 4 different domains · Click to instantly launch autonomous synthesis.")
+    st.caption("Refreshed every 3 days via live search · 4 different domains · Click to instantly launch autonomous synthesis.")
 
-    # Fetch topics (cached 24h; falls back to evergreen list on any error)
+    # Fetch topics (cached 72h; falls back to evergreen list on any error)
     trending_topics = fetch_trending_topics()
 
-    # Render in a 2×2 grid: [0,1] on left column, [2,3] on right column
-    p1, p2 = st.columns(2)
-    col_map = {0: p1, 1: p1, 2: p2, 3: p2}
+    # Render as proper 2×2 grid — Row 1 then Row 2 so both columns stay equal height
+    row1_col1, row1_col2 = st.columns(2)
+    row2_col1, row2_col2 = st.columns(2)
 
-    for idx, topic in enumerate(trending_topics[:4]):
-        with col_map[idx]:
-            if idx in (1, 3):
-                st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
-            tag   = topic.get("tag", "📌 RESEARCH")
-            title = topic.get("title", "Trending Research Topic")
-            text  = topic.get("text", "")
-            directive = topic.get("directive", title)
+    grid_cells = [
+        (0, row1_col1),
+        (1, row1_col2),
+        (2, row2_col1),
+        (3, row2_col2),
+    ]
 
+    for idx, col in grid_cells:
+        if idx >= len(trending_topics):
+            break
+        topic = trending_topics[idx]
+        tag       = topic.get("tag", "📌 RESEARCH")
+        title     = topic.get("title", "Trending Research Topic")
+        text      = topic.get("text", "")
+        directive = topic.get("directive", title)
+
+        with col:
             st.markdown(clean_html(f"""
                 <div class="card-box">
-                    <div>
-                        <div class="card-tag">{tag}</div>
-                        <div class="card-title">{title}</div>
-                        <div class="card-text">{text}</div>
-                    </div>
+                    <div class="card-tag">{tag}</div>
+                    <div class="card-title">{title}</div>
+                    <div class="card-text">{text}</div>
                 </div>
             """), unsafe_allow_html=True)
             if st.button("🚀 Launch Research", key=f"launch_preset_{idx+1}", type="primary", use_container_width=True):
                 launch_research(directive)
 
+    st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
     # Core Capabilities Grid
     st.markdown("<div class='section-title'>🛡️ Production Architecture & Quality Guardrails</div>", unsafe_allow_html=True)
     c1, c2, c3, c4 = st.columns(4)
