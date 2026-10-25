@@ -118,7 +118,10 @@ SCIENTIFIC_PREFERRED_DOMAINS: List[str] = [
     "ncbi.nlm.nih.gov",
     "ieee.org",
     "arxiv.org",
-    "scholar.google.com",
+    "sciencedirect.com",
+    "thelancet.com",
+    "nejm.org",
+    "cell.com",
 ]
 
 POLICY_PREFERRED_DOMAINS: List[str] = [

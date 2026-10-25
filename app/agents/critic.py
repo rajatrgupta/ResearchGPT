@@ -60,18 +60,20 @@ def critic_node(state: ResearchState) -> Dict[str, Any]:
     context_str = format_retrieved_documents_for_eval(retrieved_documents)
 
     prompt = PromptTemplate(
-        template="""You are an elite Research Evaluator reviewing raw context gathered by junior analysts.
-
-Your goal is to evaluate the context against the User Query and return specific metrics.
+        template="""You are an elite Research Evaluator and Peer-Review Referee.
+Current Reference Year: 2026.
+Your goal is to evaluate whether the retrieved context contains sufficient depth, empirical data, and verifiable evidence to synthesize a publication-grade executive research report.
 
 DYNAMIC EVALUATION CRITERIA:
-- If the query is QUANTITATIVE (e.g., tech comparisons, financial analysis, market share): Demand hard data, specific metrics, entities, and recent dates.
-- If the query is QUALITATIVE/HISTORICAL (e.g., historical policies, philosophy, literature): Demand logical flow, thematic accuracy, qualitative reasoning, and appropriate historical context. Do not penalize qualitative topics for lacking hard numbers.
+- Depth & Specificity: Does the context contain hard numbers, empirical benchmarks, percentages, named clinical trials/studies, sample sizes, dollar figures, or named institutional frameworks? Penalize vague, superficial summaries that only state generic qualitative claims.
+- Temporal Freshness: Does the context include up-to-date developments (2024-2026) rather than outdated speculation?
+- Source Groundedness: Are the findings attributed to recognizable, trustworthy publications and direct URLs?
 
 EVALUATION METRICS (RAGAS-Style):
-1. Faithfulness: Is the information factual and free of obvious contradictions/hallucinations based strictly on the context?
-2. Relevancy: Does the provided context directly answer the User Query without drifting into tangential topics?
-3. Quality Score: An overall judgment based on Faithfulness and Relevancy.
+1. Faithfulness: Is the information factual and free of contradictions/hallucinations based strictly on the context?
+2. Relevancy: Does the provided context directly answer the User Query with technical and empirical rigor?
+3. Quality Score: An overall judgment (0.0 to 1.0). Score >= 0.70 ONLY if the context has sufficient factual density to write an authoritative, non-fluffy report.
+4. Actionable Feedback: If Quality Score < 0.70, provide a specific sentence stating EXACTLY what empirical metrics or dimensions are missing to guide query optimization.
 
 Output your response strictly in the required JSON format containing the scores and actionable feedback.
 

@@ -27,14 +27,18 @@ from app.vectorstore.qdrant_store import store_documents, search_similar
 # ==========================================
 # PHASE 4A: TRUST-TIER RERANKING CONSTANTS
 # ==========================================
-RERANK_FETCH_LIMIT = 20
-FINAL_RETRIEVAL_LIMIT = 5
-MAX_CHUNKS_PER_DOMAIN = 2
+RERANK_FETCH_LIMIT = 30
+FINAL_RETRIEVAL_LIMIT = 12
+MAX_CHUNKS_PER_DOMAIN = 3
 
 # TLDs get a direct endswith check. Specific domains get an exact or subdomain check.
 HIGH_TRUST_TLDS = [".gov", ".edu", ".mil"]
-HIGH_TRUST_DOMAINS = ["who.int", "nature.com", "ncbi.nlm.nih.gov", "ieee.org"]
-MEDIUM_TRUST_DOMAINS = ["reuters.com", "bbc.co.uk", "apnews.com", "wsj.com", "bloomberg.com", "nytimes.com"]
+HIGH_TRUST_DOMAINS = [
+    "who.int", "nature.com", "ncbi.nlm.nih.gov", "pubmed.ncbi.nlm.nih.gov",
+    "ieee.org", "arxiv.org", "sciencedirect.com", "thelancet.com",
+    "nejm.org", "jamanetwork.com", "cell.com", "pnas.org", "acm.org"
+]
+MEDIUM_TRUST_DOMAINS = ["reuters.com", "bbc.co.uk", "apnews.com", "wsj.com", "bloomberg.com", "nytimes.com", "ft.com", "economist.com"]
 LOW_TRUST_DOMAINS = ["reddit.com", "quora.com", "medium.com", "twitter.com", "yahoo.com"]
 
 

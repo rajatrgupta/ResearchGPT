@@ -77,6 +77,7 @@ Rules for new queries:
 2. No duplicates.
 3. Use search-engine friendly phrasing (keywords, no conversational filler words).
 4. Each query should target a different gap identified by the Critic.
+5. Emphasize empirical metrics, quantitative benchmarks, clinical trial data, and recent 2024-2026 developments.
 """,
         input_variables=["query", "critic_feedback", "context"]
     )

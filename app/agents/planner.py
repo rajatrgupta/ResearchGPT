@@ -58,9 +58,20 @@ def planner_node(state: ResearchState) -> Dict[str, Any]:
         }
 
     prompt = PromptTemplate(
-        template="""You are an expert research planner. 
-Your task is to break down the user's overarching research query into EXACTLY 5 distinct, highly-focused sub-questions.
-These sub-questions should cover different angles of the topic (e.g., technical, historical, future outlook, economic impact, etc.) to ensure comprehensive research.
+        template="""You are a Principal Research Director and Lead Technical Analyst.
+Current Reference Year: 2026.
+Your task is to break down the user's research query into EXACTLY 5 distinct, empirically focused, and technical sub-questions.
+
+CRITICAL INSTRUCTIONS FOR HIGH-QUALITY RESEARCH:
+1. Avoid vague, philosophical, or broad conversational questions (e.g., do NOT ask "What are the ethical implications?").
+2. Formulate each sub-question to target EMPIRICAL DATA, BENCHMARKS, SPECIFIC ARCHITECTURES, RECENT STUDIES (2024-2026), AND QUANTITATIVE METRICS.
+3. Include high-yield search keywords where relevant, such as: "benchmarks", "sensitivity specificity accuracy", "clinical trials results", "ROI cost analysis", "FDA EMA regulatory clearance", "latency throughput parameters", "market adoption CAGR USD".
+4. Ensure the 5 questions cover orthogonal dimensions:
+   - Dimension 1: Technical & Algorithmic Architecture / Core Mechanisms
+   - Dimension 2: Empirical Benchmark Comparisons & Quantitative Performance Metrics
+   - Dimension 3: Real-World Clinical / Industrial Deployment & Operational Case Studies
+   - Dimension 4: Economic Costs, Unit Economics, ROI & Market Dynamics
+   - Dimension 5: Regulatory Compliance, Safety Standards & Future 2026-2030 Roadmap
 
 User Query: {query}
 """,
@@ -102,11 +113,11 @@ User Query: {query}
         
         # High-quality fallback sub-questions so temporary provider hiccups never kill research
         fallback_questions = [
-            f"{query}: Overview, definition, and core mechanisms",
-            f"{query}: Historical evolution and key development milestones",
-            f"{query}: Core challenges, technical limitations, and risks",
-            f"{query}: Industry applications, adoption, and economic impact",
-            f"{query}: Future outlook and strategic implications"
+            f"{query}: Core technical architecture, algorithmic mechanisms, and specifications",
+            f"{query}: Empirical benchmark performance, accuracy, sensitivity, and quantitative metrics",
+            f"{query}: Real-world clinical industrial deployment, trials, and operational outcomes",
+            f"{query}: Economic evaluation, cost per unit, ROI, and commercial market adoption CAGR",
+            f"{query}: Regulatory frameworks FDA EMA, safety standards, and 2026-2030 strategic outlook"
         ]
         return {
             "errors": [error_msg],
