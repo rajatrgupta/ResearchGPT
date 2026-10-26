@@ -37,7 +37,13 @@ else:
 
 # Create the SQLAlchemy engine
 # pool_pre_ping=True gracefully handles stale/dropped connections
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+# pool_recycle=300 recycles connections older than 5 minutes to prevent Neon serverless timeout drops
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_recycle=300,
+    pool_timeout=30
+)
 
 # Configured "Session" factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

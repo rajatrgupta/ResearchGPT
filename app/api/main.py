@@ -3,6 +3,7 @@ load_dotenv()
 
 import uuid
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -14,6 +15,15 @@ app = FastAPI(
     title="ResearchGPT API",
     description="Autonomous Multi-Agent Research System API",
     version="1.0.0"
+)
+
+# Enable CORS for universal cross-origin client compatibility (browser, mobile, preview tools)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 @app.on_event("startup")
@@ -40,9 +50,11 @@ def cleanup_orphaned_runs():
         db.close()
 
 @app.get("/")
+@app.head("/")
 @app.get("/health")
+@app.head("/health")
 def health_check():
-    """Liveliness probe for Render and client health checks."""
+    """Liveliness probe for Render, uptime monitors, and client health checks."""
     return {
         "status": "healthy",
         "service": "ResearchGPT API",

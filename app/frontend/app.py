@@ -25,6 +25,17 @@ st.set_page_config(
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://researchgpt-backend-ygh8.onrender.com/api/v1/research")
 BACKEND_HEALTH_URL = API_BASE_URL.replace("/api/v1/research", "/health")
 
+@st.cache_data(ttl=45, show_spinner=False)
+def check_backend_health() -> tuple[bool, str]:
+    """Lightweight 3.5s probe to check whether the cloud backend is warm or in standby."""
+    try:
+        r = requests.get(BACKEND_HEALTH_URL, timeout=3.5)
+        if r.status_code == 200:
+            return True, "LangGraph DAG Online"
+    except Exception:
+        pass
+    return False, "Server Standby (Auto-Wakes)"
+
 def clean_html(raw_html: str) -> str:
     """Strips leading/trailing whitespace on every line to prevent Markdown code block triggers."""
     return "\n".join(line.strip() for line in raw_html.splitlines() if line.strip())
@@ -674,7 +685,10 @@ if "_pending_directive" not in st.session_state:
 # CENTRALIZED RESEARCH EXECUTION ENGINE
 # ==========================================
 def launch_research(directive_text: str):
-    """Centralized launcher: validates directive, dispatches to backend, and handles state transitions."""
+    """
+    Centralized launcher: validates directive, dispatches to backend with
+    automatic Render free-tier cold-start resilience and retry handling.
+    """
     clean_text = directive_text.strip()
     if not clean_text:
         st.error("⚠️ Please provide a research directive.")
@@ -689,21 +703,61 @@ def launch_research(directive_text: str):
     st.session_state.final_report = None
     st.session_state.current_stage = "initialized"
 
-    with st.spinner("Dispatching DAG to ResearchGPT Orchestrator..."):
+    max_attempts = 2
+    timeout_per_attempt = 110  # Render cold start can take 60-95s
+
+    dispatch_box = st.empty()
+    dispatch_box.info("⏳ Connecting to ResearchGPT Orchestrator (waking up cloud backend if sleeping, this takes ~45-90s on first load)...")
+
+    response = None
+    last_error_str = None
+
+    for attempt in range(1, max_attempts + 1):
         try:
-            response = requests.post(API_BASE_URL, json={"query": clean_text}, timeout=25)
+            if attempt > 1:
+                dispatch_box.info(f"⏳ Server container warming up (Attempt {attempt}/{max_attempts}). Establishing handshake...")
+            
+            response = requests.post(API_BASE_URL, json={"query": clean_text}, timeout=timeout_per_attempt)
+            
             if response.status_code == 202:
-                data = response.json()
-                st.session_state.run_id = data["run_id"]
-                st.session_state.status = data.get("status", "pending")
-                st.session_state.current_stage = "initialized"
-                st.rerun()
+                break
+            elif response.status_code in [502, 503, 504]:
+                # Temporary proxy gateway response while Render container finishes booting
+                time.sleep(5)
+                continue
             else:
-                st.error(f"Engine Dispatch Error ({response.status_code}): {response.text}")
-                st.session_state.status = None
+                break
+        except requests.exceptions.Timeout:
+            last_error_str = f"Handshake timed out after {timeout_per_attempt}s (backend cold start exceeded threshold)."
+            time.sleep(4)
+        except requests.exceptions.ConnectionError:
+            last_error_str = "Backend connection temporarily refused or interrupted during container boot."
+            time.sleep(4)
         except Exception as e:
-            st.error(f"Backend Handshake Failed: {str(e)}")
-            st.session_state.status = None
+            last_error_str = str(e)
+            break
+
+    dispatch_box.empty()
+
+    if response is not None and response.status_code == 202:
+        data = response.json()
+        st.session_state.run_id = data["run_id"]
+        st.session_state.status = data.get("status", "pending")
+        st.session_state.current_stage = "initialized"
+        st.rerun()
+    elif response is not None and response.status_code != 202:
+        st.error(f"Engine Dispatch Error ({response.status_code}): {response.text}")
+        st.session_state.status = None
+    else:
+        st.error(
+            "⚠️ **Backend Handshake Interrupted**: The cloud backend server (Render Free Tier) is waking up from sleep "
+            "or experiencing a cold start. Please click **🚀 Launch Synthesis** again in a few seconds."
+        )
+        if last_error_str:
+            with st.expander("🛠️ Handshake Diagnostic Trace", expanded=False):
+                st.caption(f"Target API Endpoint: {API_BASE_URL}")
+                st.code(last_error_str, language="text")
+        st.session_state.status = None
 
 def load_directive_to_input(directive_text: str):
     """Loads a directive into the sidebar textarea for user customization."""
@@ -774,7 +828,16 @@ def build_telemetry_html(current_stage: str, stage_desc: str, elapsed_seconds: i
 # SIDEBAR: ENTERPRISE COMMAND COCKPIT
 # ==========================================
 with st.sidebar:
-    st.markdown(clean_html("""
+    is_online, status_label = check_backend_health()
+    if is_online:
+        pill_html = '<span class="status-pill"><span class="status-dot"></span> LangGraph DAG Online</span>'
+    else:
+        pill_html = (
+            '<span class="status-pill" style="background: rgba(245, 158, 11, 0.12); color: #FBBF24; border-color: rgba(245, 158, 11, 0.35);">'
+            '<span class="status-dot" style="background-color: #F59E0B; box-shadow: 0 0 8px #F59E0B; animation: none;"></span> Server Standby (Auto-Wakes)</span>'
+        )
+
+    st.markdown(clean_html(f"""
         <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 0.5rem;">
             <div style="background: linear-gradient(135deg, #2563EB, #7C3AED); width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; box-shadow: 0 4px 12px rgba(37,99,235,0.4);">🔬</div>
             <div>
@@ -783,7 +846,7 @@ with st.sidebar:
             </div>
         </div>
         <div style="margin-bottom: 1rem;">
-            <span class="status-pill"><span class="status-dot"></span> LangGraph DAG Online</span>
+            {pill_html}
         </div>
     """), unsafe_allow_html=True)
     
@@ -992,7 +1055,7 @@ else:
 
         while st.session_state.status not in ["completed", "failed"]:
             try:
-                poll_res = requests.get(f"{API_BASE_URL}/{st.session_state.run_id}", timeout=25)
+                poll_res = requests.get(f"{API_BASE_URL}/{st.session_state.run_id}", timeout=40)
                 if poll_res.status_code == 200:
                     consecutive_errors = 0
                     poll_data = poll_res.json()
@@ -1025,7 +1088,7 @@ else:
                 if consecutive_errors > 8:
                     st.error(f"Telemetry stream interrupted: {str(e)}")
                     break
-                time.sleep(3.5)
+                time.sleep(4)
 
     # ----------------------------------------------------
     # 3. COMPLETED STATE: PUBLICATION-GRADE DELIVERABLE VIEW

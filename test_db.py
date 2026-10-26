@@ -42,7 +42,7 @@ def test_database():
         print("\n🚀 PHASE 5A IS OFFICIALLY COMPLETE! Database is 100% working.")
 
     except Exception as e:
-        print(f"\n❌ Error occurred: {e}")
+        print(f"\n[ERROR] Error occurred: {str(e).encode('ascii', errors='replace').decode('ascii')}")
     finally:
         db.close()
         print("6. Database connection closed.")

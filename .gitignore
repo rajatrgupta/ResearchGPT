@@ -9,7 +9,7 @@ __pycache__/
 local_qdrant_storage/
 .DS_Store
 
-# Deployment reports & internal logs (do not commit to GitHub)
+# Deployment reports, internal logs & interview prep (do not commit to GitHub)
 *DEPLOYMENT*REPORT*.md
 DEPLOYMENT_REPORT_OCT20.md
 DEPLOYMENT_DEBUG_REPORT_OCT16.md
@@ -19,3 +19,6 @@ docs/DEPLOYMENT_DEBUG_REPORT_OCT16.md
 UI_ENHANCEMENT_REPORT_OCT22.md
 *SESSION_REPORT*.md
 *DEV_LOG*.md
+*OPTIMIZATION*REPORT*.md
+*REPORT*.md
+Interview_Prep*.md
